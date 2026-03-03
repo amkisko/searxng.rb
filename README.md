@@ -4,12 +4,6 @@
 
 Ruby gem providing a SearXNG HTTP client, CLI (search), and MCP (Model Context Protocol) server for web search. Integrates with MCP-compatible clients like Codex, Cursor, Claude, and other MCP-enabled tools.
 
-Sponsored by [Kisko Labs](https://www.kiskolabs.com).
-
-<a href="https://www.kiskolabs.com">
-  <img src="kisko.svg" width="200" alt="Sponsored by Kisko Labs" />
-</a>
-
 ## Requirements
 
 - **Ruby 3.1 or higher** (Ruby 3.0 and earlier are not supported). For managing Ruby versions, [rbenv](https://github.com/rbenv/rbenv) or [mise](https://mise.jdx.dev/) are recommended; system Ruby may be sufficient if it meets the version requirement.
@@ -28,6 +22,28 @@ gem "searxng"
 
 **Quick start with a local SearXNG instance:** The repo includes a ready-made [docker-compose](examples/docker-compose.yml) and [settings](examples/searxng/settings.yml) so you can run SearXNG locally (JSON format and limiter preconfigured for the gem). From the repo root: `docker compose -f examples/docker-compose.yml up -d`, then `export SEARXNG_URL="http://localhost:8080"`. See [examples/SETUP.md](examples/SETUP.md) for details.
 
+### CLI
+
+```bash
+searxng search "your query"
+searxng search "ruby" --page 2 --language en --time-range day --json
+```
+
+Options: `--url`, `--page`, `--language`, `--time-range` (day|month|year), `--safesearch` (0|1|2), `--json`.
+
+### Ruby API
+
+```ruby
+require "searxng"
+
+client = Searxng::Client.new
+data = client.search("ruby programming", pageno: 1, language: "en")
+
+data[:results].each do |r|
+  puts r[:title], r[:url], r[:content]
+end
+```
+
 ### Configuration
 
 - **SEARXNG_URL** (required for remote): Base URL of your SearXNG instance (e.g. `http://localhost:8080` or `https://search.example.com`). Defaults to `http://localhost:8080` when not set.
@@ -36,6 +52,13 @@ gem "searxng"
 - **SEARXNG_USER_AGENT** (optional): Custom User-Agent string. The client sends a default identifying the gem; if your instance returns 403 Forbidden (e.g. bot detection), set a custom User-Agent or pass `user_agent:` to `Searxng::Client.new`.
 
 To fully customize the HTTP client (e.g. custom certs, proxy, timeouts), override `#build_http(uri)` in a subclass, or pass a `configure_http:` callable to the client; it is invoked with the `Net::HTTP` instance and the request URI before each request.
+
+## MCP Tools
+
+The MCP server provides the following tools:
+
+1. **searxng_web_search** - Web search via SearXNG
+   - Parameters: `query` (required), `pageno` (optional), `max_results` (optional, default 10), `time_range` (optional), `language` (optional), `safesearch` (optional). Use `max_results` to limit how many results are returned in one response (reduces token usage); use `pageno` for the next page.
 
 ### Cursor IDE Configuration
 
@@ -123,37 +146,6 @@ Useful for testing the `searxng_web_search` tool before integrating with Cursor 
 - **Configurable HTTP**: Optional custom CA, verify mode, and `configure_http` hook or `build_http` override for proxy/timeouts/certs
 - **Basic Auth**: Optional Basic authentication via options or ENV
 
-## Basic Usage
-
-### Ruby API
-
-```ruby
-require "searxng"
-
-client = Searxng::Client.new
-data = client.search("ruby programming", pageno: 1, language: "en")
-
-data[:results].each do |r|
-  puts r[:title], r[:url], r[:content]
-end
-```
-
-### CLI
-
-```bash
-searxng search "your query"
-searxng search "ruby" --page 2 --language en --time-range day --json
-```
-
-Options: `--url`, `--page`, `--language`, `--time-range` (day|month|year), `--safesearch` (0|1|2), `--json`.
-
-## MCP Tools
-
-The MCP server provides the following tools:
-
-1. **searxng_web_search** - Web search via SearXNG
-   - Parameters: `query` (required), `pageno` (optional), `max_results` (optional, default 10), `time_range` (optional), `language` (optional), `safesearch` (optional). Use `max_results` to limit how many results are returned in one response (reduces token usage); use `pageno` for the next page.
-
 ## Examples
 
 See [examples/SETUP.md](examples/SETUP.md) for running SearXNG locally (e.g. Docker) and [examples/run_queries.rb](examples/run_queries.rb) for a small script using the client.
@@ -201,3 +193,11 @@ If you discover a security vulnerability, please report it responsibly. See [SEC
 ## License
 
 The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).
+
+## Sponsors
+
+Sponsored by [Kisko Labs](https://www.kiskolabs.com).
+
+<a href="https://www.kiskolabs.com">
+  <img src="kisko.svg" width="200" alt="Sponsored by Kisko Labs" />
+</a>
