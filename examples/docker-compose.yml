@@ -1,0 +1,20 @@
+# Minimal SearXNG setup for local development and testing the gem.
+# Run from repo root: docker compose -f examples/docker-compose.yml up -d
+# Or from examples/:  docker compose up -d
+# Then: export SEARXNG_URL="http://localhost:8080"
+#
+# Config is in examples/searxng/settings.yml (formats: html+json, limiter off).
+
+services:
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./searxng:/etc/searxng:ro
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+      - SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml
+      - SEARXNG_LIMITER=false

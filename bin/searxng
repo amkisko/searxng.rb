@@ -1,0 +1,70 @@
+#!/usr/bin/env ruby
+
+cmd = ARGV.shift
+
+case cmd
+when "serve"
+  unless ENV["DEBUG"]
+    require "stringio"
+    $stderr = StringIO.new
+    $stderr.set_encoding("UTF-8")
+  end
+  $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
+  require "searxng/server"
+  Searxng::Server.start
+when "search"
+  $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
+  require "searxng"
+  require "optparse"
+  require "json"
+
+  base_url = nil
+  page = 1
+  language = "all"
+  time_range = nil
+  safesearch = nil
+  json_output = false
+
+  OptionParser.new do |o|
+    o.on("--url URL", "SearXNG base URL (overrides SEARXNG_URL)") { |v| base_url = v }
+    o.on("--page N", Integer, "Page number (default: 1)") { |v| page = v }
+    o.on("--language LANG", "Language code (default: all)") { |v| language = v }
+    o.on("--time-range RANGE", "Time range: day, month, year") { |v| time_range = v }
+    o.on("--safesearch N", Integer, "Safe search: 0, 1, or 2") { |v| safesearch = v }
+    o.on("--json", "Output raw JSON") { json_output = true }
+  end.parse!(ARGV)
+
+  query = ARGV.join(" ").strip
+  if query.empty?
+    warn "Usage: searxng search QUERY [--url URL] [--page N] [--language LANG] [--time-range day|month|year] [--safesearch 0|1|2] [--json]"
+    exit 1
+  end
+
+  opts = { pageno: page, language: language, time_range: time_range, safesearch: safesearch }
+  opts[:base_url] = base_url if base_url
+
+  client = Searxng::Client.new(**opts.slice(:base_url))
+  data = client.search(query, **opts.slice(:pageno, :time_range, :language, :safesearch))
+
+  if json_output
+    puts JSON.pretty_generate(data)
+  else
+    data[:infoboxes]&.each do |ib|
+      puts "Infobox: #{ib[:infobox]}"
+      puts "  #{ib[:content]}"
+      puts ""
+    end
+    data[:results]&.each do |r|
+      puts "#{r[:title]}"
+      puts "  #{r[:url]}"
+      puts "  #{r[:content]}"
+      puts ""
+    end
+    puts "No results found" if (data[:results].nil? || data[:results].empty?) && (data[:infoboxes].nil? || data[:infoboxes].empty?)
+  end
+else
+  warn "Usage: searxng (search|serve) ..."
+  warn "  search QUERY  - Run a search and print results"
+  warn "  serve        - Start MCP server (stdio)"
+  exit 1
+end

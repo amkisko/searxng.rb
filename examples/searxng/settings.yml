@@ -1,0 +1,15 @@
+# Minimal settings for local development and testing the gem.
+# Mount this folder as /etc/searxng in Docker (see examples/docker-compose.yml).
+# See https://docs.searxng.org/admin/settings/settings.html
+
+use_default_settings: true
+
+search:
+  formats:
+    - html
+    - json   # required for API/script access; missing format causes 403
+
+server:
+  secret_key: "change-me-in-production"
+  limiter: false   # disable for private/local use; set true for public instances
+  image_proxy: true

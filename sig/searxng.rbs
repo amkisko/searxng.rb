@@ -1,0 +1,36 @@
+module Searxng
+  VERSION: String
+
+  class Error < StandardError; end
+  class ConfigurationError < Error; end
+  class NetworkError < Error; end
+
+  class APIError < Error
+    def initialize: (String message, ?status_code: Integer?, ?response_data: String?, ?uri: String?) -> void
+    attr_reader status_code: Integer?
+    attr_reader response_data: String?
+    attr_reader uri: String?
+  end
+
+  class Client
+    def initialize: (
+      ?base_url: String?,
+      ?user: String?,
+      ?password: String?,
+      ?open_timeout: Integer,
+      ?read_timeout: Integer,
+      ?ca_file: String?,
+      ?ca_path: String?,
+      ?verify_mode: Integer?,
+      ?user_agent: String?,
+      ?configure_http: (Net::HTTP, URI::Generic) -> void
+    ) -> void
+    def search: (
+      String query,
+      ?pageno: Integer,
+      ?time_range: String?,
+      ?language: String,
+      ?safesearch: Integer?
+    ) -> Hash[Symbol, untyped]
+  end
+end
