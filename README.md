@@ -26,6 +26,8 @@ Or add to your Gemfile:
 gem "searxng"
 ```
 
+**Quick start with a local SearXNG instance:** The repo includes a ready-made [docker-compose](examples/docker-compose.yml) and [settings](examples/searxng/settings.yml) so you can run SearXNG locally (JSON format and limiter preconfigured for the gem). From the repo root: `docker compose -f examples/docker-compose.yml up -d`, then `export SEARXNG_URL="http://localhost:8080"`. See [examples/SETUP.md](examples/SETUP.md) for details.
+
 ### Configuration
 
 - **SEARXNG_URL** (required for remote): Base URL of your SearXNG instance (e.g. `http://localhost:8080` or `https://search.example.com`). Defaults to `http://localhost:8080` when not set.
