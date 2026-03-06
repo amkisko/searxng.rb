@@ -136,13 +136,13 @@ RSpec.describe Searxng::Client do
     it "raises NetworkError on connection failure" do
       stub_request(:get, search_uri).to_timeout
 
-      expect { client.search("hello") }.to raise_error(Searxng::NetworkError, /Connection failed/)
+      expect { client.search("hello") }.to raise_error(Searxng::NetworkError, /Timeout Error|Network Error/)
     end
 
     it "raises NetworkError when server closes connection (EOFError)" do
       stub_request(:get, search_uri).to_raise(EOFError.new("end of file reached"))
 
-      expect { client.search("hello") }.to raise_error(Searxng::NetworkError, /Connection failed.*end of file reached/)
+      expect { client.search("hello") }.to raise_error(Searxng::NetworkError, /end of file reached/)
     end
 
     it "sends Basic auth when user and password are set" do
@@ -188,6 +188,57 @@ RSpec.describe Searxng::Client do
       expect(received_http).to be_a(Net::HTTP)
       expect(received_uri).to be_a(URI::HTTP)
       expect(received_uri.to_s).to include("/search")
+    end
+
+    it "uses AUTH_USERNAME and AUTH_PASSWORD env fallback" do
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with("AUTH_USERNAME").and_return("env-user")
+      allow(ENV).to receive(:[]).with("AUTH_PASSWORD").and_return("env-pass")
+
+      c = described_class.new(base_url: base_url)
+      expect(c.instance_variable_get(:@user)).to eq("env-user")
+      expect(c.instance_variable_get(:@password)).to eq("env-pass")
+    end
+  end
+
+  describe "proxy helpers" do
+    around do |example|
+      original = ENV.to_h
+      begin
+        example.run
+      ensure
+        ENV.replace(original)
+      end
+    end
+
+    it "reads HTTP(S)_PROXY and respects NO_PROXY host matches" do
+      ENV["HTTPS_PROXY"] = "http://proxy.local:8080"
+      ENV["NO_PROXY"] = "example.com"
+      https_uri = URI.parse("https://example.com/search")
+      other_uri = URI.parse("https://ruby-lang.org")
+
+      expect(client.send(:proxy_uri_for, https_uri)).to be_nil
+      expect(client.send(:proxy_uri_for, other_uri)).to be_a(URI::HTTP)
+    end
+
+    it "handles invalid proxy config and wildcard no_proxy" do
+      ENV["HTTP_PROXY"] = "bad::proxy::url"
+      ENV["NO_PROXY"] = "*"
+      http_uri = URI.parse("http://any-host.local")
+
+      expect(client.send(:no_proxy_match?, "any-host.local")).to eq(true)
+      expect(client.send(:proxy_uri_for, http_uri)).to be_nil
+    end
+
+    it "falls back to ALL_PROXY when protocol-specific proxy is missing" do
+      ENV.delete("HTTP_PROXY")
+      ENV.delete("HTTPS_PROXY")
+      ENV["ALL_PROXY"] = "http://proxy.local:8080"
+
+      uri = URI.parse("https://example.net")
+      proxy = client.send(:proxy_uri_for, uri)
+      expect(proxy).to be_a(URI::HTTP)
+      expect(proxy.host).to eq("proxy.local")
     end
   end
 end

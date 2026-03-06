@@ -46,10 +46,16 @@ end
 
 ### Configuration
 
-- **SEARXNG_URL** (required for remote): Base URL of your SearXNG instance (e.g. `http://localhost:8080` or `https://search.example.com`). Defaults to `http://localhost:8080` when not set.
-- **SEARXNG_USER** / **SEARXNG_PASSWORD** (optional): Basic auth credentials if your instance is protected.
+- **SEARXNG_URL**: Base URL of your SearXNG instance (e.g. `http://localhost:8080` or `https://search.example.com`). The client defaults to `http://localhost:8080`; MCP server startup validates that this variable is explicitly set and well-formed.
+- **SEARXNG_USER** / **SEARXNG_PASSWORD** (optional): Basic auth credentials if your instance is protected. `AUTH_USERNAME` / `AUTH_PASSWORD` are also accepted for compatibility. Auth vars must be provided as a pair.
 - **SEARXNG_CA_FILE** / **SEARXNG_CA_PATH** (optional): Custom CA certificate file or directory for HTTPS. You can also pass `ca_file:`, `ca_path:`, or `verify_mode:` to `Searxng::Client.new`.
 - **SEARXNG_USER_AGENT** (optional): Custom User-Agent string. The client sends a default identifying the gem; if your instance returns 403 Forbidden (e.g. bot detection), set a custom User-Agent or pass `user_agent:` to `Searxng::Client.new`.
+- **HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / NO_PROXY** (optional): Proxy configuration for HTTP(S) requests.
+- **FTP_USER / FTP_PASSWORD** (optional): FTP credentials used when URL doesn’t include auth.
+- **SFTP_USER / SFTP_PASSWORD** (optional): SFTP credentials used when URL doesn’t include auth.
+- **SMB_USER / SMB_PASSWORD / SMB_DOMAIN** (optional): SMB credentials/domain used when URL doesn’t include auth.
+- **IPFS_GATEWAY** (optional): Gateway used for `ipfs://` URLs (default: `https://ipfs.io`).
+- **GEMINI_INSECURE=1** (optional): disables TLS certificate verification for Gemini fetches in `web_url_read`.
 
 To fully customize the HTTP client (e.g. custom certs, proxy, timeouts), override `#build_http(uri)` in a subclass, or pass a `configure_http:` callable to the client; it is invoked with the `Net::HTTP` instance and the request URI before each request.
 
@@ -59,6 +65,15 @@ The MCP server provides the following tools:
 
 1. **searxng_web_search** - Web search via SearXNG
    - Parameters: `query` (required), `pageno` (optional), `max_results` (optional, default 10), `time_range` (optional), `language` (optional), `safesearch` (optional). Use `max_results` to limit how many results are returned in one response (reduces token usage); use `pageno` for the next page.
+2. **web_url_read** - Fetch a URL and return Markdown content
+   - Parameters: `url` (required), `startChar`, `maxLength`, `section`, `paragraphRange`, `readHeadings`, `timeoutMs` (all optional).
+   - Uses `teplo_core` for HTML/XML to Markdown conversion (with workspace fallback to `textplorer/core-ruby` in development).
+   - Supports `http`, `https`, `ftp`, `sftp`, `smb`, `gemini`, and `ipfs` URLs (`ipfs://` is resolved via `IPFS_GATEWAY`).
+
+The MCP server also exposes resources:
+
+- `config://server-config` - current server/environment capabilities
+- `help://usage-guide` - concise usage and configuration guide
 
 ### Cursor IDE Configuration
 
@@ -145,6 +160,18 @@ Useful for testing the `searxng_web_search` tool before integrating with Cursor 
 - **MCP Server Integration**: Ready-to-use MCP server with web search tool, compatible with Cursor IDE, Claude Desktop, and other MCP-enabled tools
 - **Configurable HTTP**: Optional custom CA, verify mode, and `configure_http` hook or `build_http` override for proxy/timeouts/certs
 - **Basic Auth**: Optional Basic authentication via options or ENV
+- **Fail-fast MCP validation**: MCP startup validates `SEARXNG_URL` and auth variable pairs
+- **User-facing errors**: Clear network/HTTP/configuration error messages
+
+## Protocol Support Notes
+
+- `http` / `https`: fully supported.
+- `ftp`: supported by `web_url_read` (requires `net-ftp` runtime gem).
+- `sftp`: supported by `web_url_read` (requires `net-sftp` runtime gem).
+- `smb`: supported by `web_url_read` via `smbclient` available in `PATH`.
+- `gemini`: supported by `web_url_read` (Gemini fetch + Gemtext to Markdown conversion).
+- `ipfs`: supported by `web_url_read` through gateway resolution (`ipfs://` -> `IPFS_GATEWAY`).
+- `tor` / `i2p`: supported through `.onion` / `.i2p` hosts over HTTP(S), typically with proxy configuration.
 
 ## Examples
 
