@@ -136,7 +136,7 @@ module Searxng
       return nil if raw.nil? || raw.strip.empty?
 
       URI(raw.include?("://") ? raw : "http://#{raw}")
-    rescue StandardError
+    rescue
       nil
     end
 
@@ -146,13 +146,21 @@ module Searxng
       raw = ENV["NO_PROXY"] || ENV["no_proxy"]
       return false if raw.nil? || raw.strip.empty?
 
-      host_ip = IPAddr.new(host) rescue nil
+      host_ip = begin
+        IPAddr.new(host)
+      rescue
+        nil
+      end
       raw.split(",").any? do |entry|
         token = entry.to_s.strip
         next false if token.empty?
         return true if token == "*"
 
-        cidr = (IPAddr.new(token) rescue nil)
+        cidr = begin
+          IPAddr.new(token)
+        rescue
+          nil
+        end
         if cidr && host_ip
           next cidr.include?(host_ip)
         end

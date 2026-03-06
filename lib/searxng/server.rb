@@ -283,7 +283,7 @@ module Searxng
         else
           markdown
         end
-      rescue StandardError => e
+      rescue => e
         raise APIError.new("Conversion Error: Cannot convert HTML to Markdown (#{base_url}) - #{e.message}", uri: base_url)
       end
 
@@ -325,7 +325,7 @@ module Searxng
         raise NetworkError, "Timeout Error: #{uri.host} took longer than #{timeout_ms}ms to respond"
       rescue SocketError, Errno::ECONNREFUSED, Errno::ETIMEDOUT, Errno::ECONNRESET, Errno::EPIPE, EOFError => e
         raise NetworkError, ErrorMessages.network_error(e, uri: uri, target: "FTP server")
-      rescue StandardError => e
+      rescue => e
         if e.class.name.start_with?("Net::FTP")
           raise APIError.new("FTP Error: #{e.message}", uri: uri.to_s)
         end
@@ -348,7 +348,7 @@ module Searxng
 
         result = nil
         Timeout.timeout(timeout_ms / 1000.0) do
-          Net::SFTP.start(uri.host, user, password: password, port: (uri.port || 22), non_interactive: true, verify_host_key: :never) do |sftp|
+          Net::SFTP.start(uri.host, user, password: password, port: uri.port || 22, non_interactive: true, verify_host_key: :never) do |sftp|
             result = sftp.download!(path)
           end
         end
@@ -357,7 +357,7 @@ module Searxng
         raise NetworkError, "Timeout Error: #{uri.host} took longer than #{timeout_ms}ms to respond"
       rescue SocketError, Errno::ECONNREFUSED, Errno::ETIMEDOUT, Errno::ECONNRESET, Errno::EPIPE, EOFError => e
         raise NetworkError, ErrorMessages.network_error(e, uri: uri, target: "SFTP server")
-      rescue StandardError => e
+      rescue => e
         raise e if e.is_a?(ConfigurationError)
         if e.class.name.include?("StatusException")
           description = e.respond_to?(:description) ? e.description : e.message
@@ -376,10 +376,8 @@ module Searxng
         domain = ENV["SMB_DOMAIN"]
 
         auth = if user
-          full_user = domain && !domain.empty? ? "#{domain}\\#{user}" : user
+          full_user = (domain && !domain.empty?) ? "#{domain}\\#{user}" : user
           "#{full_user}%#{pass}"
-        else
-          nil
         end
 
         escaped_remote = remote_path.gsub('"', '\"')
@@ -397,7 +395,7 @@ module Searxng
           stdout, stderr, status = Open3.capture3(*cmd)
         end
 
-        raise APIError.new("SMB Error: #{stderr.strip.empty? ? 'request failed' : stderr.strip}", uri: uri.to_s) unless status.success?
+        raise APIError.new("SMB Error: #{stderr.strip.empty? ? "request failed" : stderr.strip}", uri: uri.to_s) unless status.success?
 
         stdout
       rescue Errno::ENOENT
@@ -424,7 +422,7 @@ module Searxng
           tcp = TCPSocket.new(uri.host, uri.port || 1965)
           begin
             ctx = OpenSSL::SSL::SSLContext.new
-            ctx.verify_mode = ENV["GEMINI_INSECURE"] == "1" ? OpenSSL::SSL::VERIFY_NONE : OpenSSL::SSL::VERIFY_PEER
+            ctx.verify_mode = (ENV["GEMINI_INSECURE"] == "1") ? OpenSSL::SSL::VERIFY_NONE : OpenSSL::SSL::VERIFY_PEER
             ssl = OpenSSL::SSL::SSLSocket.new(tcp, ctx)
             ssl.hostname = uri.host if ssl.respond_to?(:hostname=)
             ssl.connect
@@ -480,7 +478,7 @@ module Searxng
           elsif line.start_with?("# ")
             "# #{line[2..].to_s.strip}"
           elsif line.start_with?("> ")
-            "> #{line[2..].to_s}"
+            "> #{line[2..]}"
           else
             line
           end
@@ -541,7 +539,7 @@ module Searxng
         end
 
         start = [start_char.to_i, 0].max
-        result = start >= result.length ? "" : result[start..]
+        result = (start >= result.length) ? "" : result[start..]
 
         if max_length
           max = max_length.to_i
