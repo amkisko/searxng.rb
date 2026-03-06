@@ -1,4 +1,4 @@
-# searxng
+# searxng.rb
 
 [![Gem Version](https://badge.fury.io/rb/searxng.svg?v=0.1.0)](https://badge.fury.io/rb/searxng) [![Test Status](https://github.com/amkisko/searxng.rb/actions/workflows/test.yml/badge.svg)](https://github.com/amkisko/searxng.rb/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/amkisko/searxng.rb/graph/badge.svg)](https://codecov.io/gh/amkisko/searxng.rb)
 
