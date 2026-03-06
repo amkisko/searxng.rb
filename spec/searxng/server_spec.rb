@@ -302,8 +302,8 @@ RSpec.describe Searxng::Server do
       expect(tool).to have_received(:fetch_smb)
     end
 
-    it "rejects unsupported schemes and spartan protocol" do
-      expect { tool.call(url: "spartan://example.com") }.to raise_error(Searxng::ConfigurationError, /not supported yet/)
+    it "rejects unsupported schemes" do
+      expect { tool.call(url: "spartan://example.com") }.to raise_error(Searxng::ConfigurationError, /Unsupported URL scheme/)
       expect { tool.call(url: "gopher://example.com") }.to raise_error(Searxng::ConfigurationError, /Unsupported URL scheme/)
     end
 

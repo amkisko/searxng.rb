@@ -156,11 +156,12 @@ RSpec.describe Searxng::Client do
     end
 
     it "sends User-Agent header (default or custom)" do
+      default_ua = "searxng-ruby/#{Searxng::VERSION} (https://github.com/amkisko/searxng.rb)"
       stub_request(:get, search_uri)
-        .with(headers: {"User-Agent" => "searxng-ruby/0.1.0 (https://github.com/amkisko/searxng.rb)"})
+        .with(headers: {"User-Agent" => default_ua})
         .to_return(status: 200, body: '{"query":"hi","results":[],"infoboxes":[]}', headers: {"Content-Type" => "application/json"})
       client.search("hello")
-      expect(WebMock).to have_requested(:get, search_uri).with(headers: {"User-Agent" => "searxng-ruby/0.1.0 (https://github.com/amkisko/searxng.rb)"})
+      expect(WebMock).to have_requested(:get, search_uri).with(headers: {"User-Agent" => default_ua})
 
       stub_request(:get, search_uri)
         .with(headers: {"User-Agent" => "MyBot/1.0"})

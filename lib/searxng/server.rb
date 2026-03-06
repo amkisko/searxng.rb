@@ -224,7 +224,7 @@ module Searxng
         uri = URI.parse(raw)
         if uri.scheme
           scheme = uri.scheme.downcase
-          return raw if uri.host && %w[http https ftp sftp smb gemini ipfs spartan].include?(scheme)
+          return raw if uri.host && %w[http https ftp sftp smb gemini ipfs].include?(scheme)
 
           raise ConfigurationError, %(Unsupported URL scheme "#{uri.scheme}". Supported schemes: http, https, ftp, sftp, smb, gemini, ipfs.)
         end
@@ -679,7 +679,6 @@ module Searxng
           - `sftp`: supported in `web_url_read` (requires `net-sftp` gem)
           - `smb`: supported in `web_url_read` via `smbclient` command
           - `gemini`: supported in `web_url_read` (Gemini fetch + Gemtext conversion)
-          - `spartan`: currently not supported directly (use a bridge/gateway)
           - `ipfs`: supported via HTTP gateway mapping (`ipfs://...` -> `IPFS_GATEWAY`)
           - `tor` / `i2p`: supported via `.onion` / `.i2p` hosts over HTTP(S) with proxy configuration
           - `socks5`: configure via proxy environment and run through a local bridge/proxy compatible with your client setup

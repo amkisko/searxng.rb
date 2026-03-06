@@ -1,6 +1,6 @@
 # searxng.rb
 
-[![Gem Version](https://badge.fury.io/rb/searxng.svg?v=0.1.0)](https://badge.fury.io/rb/searxng) [![Test Status](https://github.com/amkisko/searxng.rb/actions/workflows/test.yml/badge.svg)](https://github.com/amkisko/searxng.rb/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/amkisko/searxng.rb/graph/badge.svg)](https://codecov.io/gh/amkisko/searxng.rb)
+[![Gem Version](https://badge.fury.io/rb/searxng.svg?v=0.2.0)](https://badge.fury.io/rb/searxng) [![Test Status](https://github.com/amkisko/searxng.rb/actions/workflows/test.yml/badge.svg)](https://github.com/amkisko/searxng.rb/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/amkisko/searxng.rb/graph/badge.svg)](https://codecov.io/gh/amkisko/searxng.rb)
 
 Ruby gem providing a SearXNG HTTP client, CLI (search), and MCP (Model Context Protocol) server for web search. Integrates with MCP-compatible clients like Codex, Cursor, Claude, and other MCP-enabled tools.
 
