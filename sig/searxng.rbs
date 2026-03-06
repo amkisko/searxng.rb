@@ -12,6 +12,16 @@ module Searxng
     attr_reader uri: String?
   end
 
+  module ErrorMessages
+    def self.configuration_missing_url: () -> String
+    def self.configuration_invalid_url: (untyped url) -> String
+    def self.configuration_invalid_protocol: (untyped protocol) -> String
+    def self.configuration_auth_pair: () -> String
+    def self.no_results: (String query) -> String
+    def self.network_error: (Exception exception, ?uri: URI::Generic?, ?target: String) -> String
+    def self.api_error: (Integer status_code, String status_message) -> String
+  end
+
   class Client
     def initialize: (
       ?base_url: String?,
@@ -23,7 +33,7 @@ module Searxng
       ?ca_path: String?,
       ?verify_mode: Integer?,
       ?user_agent: String?,
-      ?configure_http: (Net::HTTP, URI::Generic) -> void
+      ?configure_http: ((Net::HTTP, URI::Generic) -> void)?
     ) -> void
     def search: (
       String query,
