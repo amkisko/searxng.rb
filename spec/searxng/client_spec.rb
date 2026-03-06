@@ -227,7 +227,7 @@ RSpec.describe Searxng::Client do
       ENV["NO_PROXY"] = "*"
       http_uri = URI.parse("http://any-host.local")
 
-      expect(client.send(:no_proxy_match?, "any-host.local")).to eq(true)
+      expect(client.send(:no_proxy_match?, "any-host.local")).to be(true)
       expect(client.send(:proxy_uri_for, http_uri)).to be_nil
     end
 

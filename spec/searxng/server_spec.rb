@@ -5,13 +5,13 @@ RSpec.describe Searxng::Server do
   describe Searxng::Server::NullLogger do
     it "tracks transport and initialization state" do
       logger = described_class.new
-      expect(logger.client_initialized?).to eq(false)
+      expect(logger.client_initialized?).to be(false)
       logger.set_client_initialized
-      expect(logger.client_initialized?).to eq(true)
+      expect(logger.client_initialized?).to be(true)
       logger.transport = :stdio
-      expect(logger.stdio_transport?).to eq(true)
+      expect(logger.stdio_transport?).to be(true)
       logger.transport = :rack
-      expect(logger.rack_transport?).to eq(true)
+      expect(logger.rack_transport?).to be(true)
     end
   end
 
@@ -242,8 +242,7 @@ RSpec.describe Searxng::Server do
 
         C
       MD
-      allow(tool).to receive(:fetch_html).and_return("<html></html>")
-      allow(tool).to receive(:convert_to_markdown).and_return(markdown)
+      allow(tool).to receive_messages(fetch_html: "<html></html>", convert_to_markdown: markdown)
 
       result = tool.call(url: "https://example.com", section: "Details", maxLength: 4)
 
@@ -251,8 +250,7 @@ RSpec.describe Searxng::Server do
     end
 
     it "routes gemini URLs through gemini fetch + gemtext conversion" do
-      allow(tool).to receive(:fetch_gemini).and_return("# Gemini\n=> /docs Docs")
-      allow(tool).to receive(:gemtext_to_markdown).and_return("# Gemini\n- [Docs](gemini://example.com/docs)")
+      allow(tool).to receive_messages(fetch_gemini: "# Gemini\n=> /docs Docs", gemtext_to_markdown: "# Gemini\n- [Docs](gemini://example.com/docs)")
 
       result = tool.call(url: "gemini://example.com")
 
@@ -262,9 +260,7 @@ RSpec.describe Searxng::Server do
     end
 
     it "routes ipfs URLs through gateway resolution + html conversion" do
-      allow(tool).to receive(:resolve_ipfs_url).and_return("https://ipfs.io/ipfs/cid/path")
-      allow(tool).to receive(:fetch_html).and_return("<h1>IPFS</h1>")
-      allow(tool).to receive(:convert_to_markdown).and_return("# IPFS")
+      allow(tool).to receive_messages(resolve_ipfs_url: "https://ipfs.io/ipfs/cid/path", fetch_html: "<h1>IPFS</h1>", convert_to_markdown: "# IPFS")
 
       result = tool.call(url: "ipfs://cid/path")
 
@@ -273,8 +269,7 @@ RSpec.describe Searxng::Server do
     end
 
     it "routes ftp URLs through ftp fetch + content conversion" do
-      allow(tool).to receive(:fetch_ftp).and_return("hello from ftp")
-      allow(tool).to receive(:convert_fetched_content).and_return("hello from ftp")
+      allow(tool).to receive_messages(fetch_ftp: "hello from ftp", convert_fetched_content: "hello from ftp")
 
       result = tool.call(url: "ftp://example.com/path/file.txt")
 
@@ -283,8 +278,7 @@ RSpec.describe Searxng::Server do
     end
 
     it "routes sftp URLs through sftp fetch + content conversion" do
-      allow(tool).to receive(:fetch_sftp).and_return("hello from sftp")
-      allow(tool).to receive(:convert_fetched_content).and_return("hello from sftp")
+      allow(tool).to receive_messages(fetch_sftp: "hello from sftp", convert_fetched_content: "hello from sftp")
 
       result = tool.call(url: "sftp://user@example.com/path/file.txt")
 
@@ -293,8 +287,7 @@ RSpec.describe Searxng::Server do
     end
 
     it "routes smb URLs through smb fetch + content conversion" do
-      allow(tool).to receive(:fetch_smb).and_return("hello from smb")
-      allow(tool).to receive(:convert_fetched_content).and_return("hello from smb")
+      allow(tool).to receive_messages(fetch_smb: "hello from smb", convert_fetched_content: "hello from smb")
 
       result = tool.call(url: "smb://fileserver/share/path/file.txt")
 
@@ -309,8 +302,7 @@ RSpec.describe Searxng::Server do
 
     it "extracts only headings when requested" do
       markdown = "# H1\ntext\n## H2\nmore"
-      allow(tool).to receive(:fetch_html).and_return("<html></html>")
-      allow(tool).to receive(:convert_to_markdown).and_return(markdown)
+      allow(tool).to receive_messages(fetch_html: "<html></html>", convert_to_markdown: markdown)
 
       result = tool.call(url: "https://example.com", readHeadings: true)
 
@@ -398,8 +390,7 @@ RSpec.describe Searxng::Server do
     it "returns content warning when markdown conversion is empty" do
       allow(tool).to receive(:load_teplo_core!).and_return(true)
       stub_const("TeploCore", Module.new)
-      allow(TeploCore).to receive(:parse_html).and_return(:ast)
-      allow(TeploCore).to receive(:ast_to_markdown).and_return(" ")
+      allow(TeploCore).to receive_messages(parse_html: :ast, ast_to_markdown: " ")
 
       result = tool.send(:convert_to_markdown, "<html></html>", "https://example.com")
 
@@ -415,8 +406,7 @@ RSpec.describe Searxng::Server do
     it "returns markdown on successful conversion" do
       allow(tool).to receive(:load_teplo_core!).and_return(true)
       stub_const("TeploCore", Module.new)
-      allow(TeploCore).to receive(:parse_html).and_return(:ast)
-      allow(TeploCore).to receive(:ast_to_markdown).and_return("# Converted")
+      allow(TeploCore).to receive_messages(parse_html: :ast, ast_to_markdown: "# Converted")
 
       result = tool.send(:convert_to_markdown, "<html></html>", "https://example.com")
 
@@ -582,7 +572,7 @@ RSpec.describe Searxng::Server do
     it "fetches ftp content successfully" do
       allow(tool).to receive(:require).with("net/ftp").and_return(true)
       stub_const("Net::FTP", Class.new)
-      ftp = instance_double("Net::FTP", closed?: false)
+      ftp = instance_double(Net::FTP, closed?: false)
       allow(Net::FTP).to receive(:new).and_return(ftp)
       allow(ftp).to receive(:connect)
       allow(ftp).to receive(:read_timeout=)
@@ -667,8 +657,8 @@ RSpec.describe Searxng::Server do
 
       expect(data.dig("server_info", "name")).to eq("searxng")
       expect(data.dig("environment", "searxng_url")).to eq("https://example.com")
-      expect(data.dig("environment", "has_auth")).to eq(true)
-      expect(data.dig("environment", "has_proxy")).to eq(true)
+      expect(data.dig("environment", "has_auth")).to be(true)
+      expect(data.dig("environment", "has_proxy")).to be(true)
       expect(data.dig("capabilities", "tools")).to include("web_url_read")
     end
 

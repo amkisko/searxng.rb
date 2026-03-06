@@ -188,33 +188,40 @@ module Searxng
         optional(:timeoutMs).filled(:integer).description("Request timeout in ms (default: 10000)")
       end
 
-      def call(url:, startChar: 0, maxLength: nil, section: nil, paragraphRange: nil, readHeadings: false, timeoutMs: 10_000)
+      def call(url:, **kwargs)
+        start_char = kwargs.fetch(:startChar, 0)
+        max_length = kwargs[:maxLength]
+        section = kwargs[:section]
+        paragraph_range = kwargs[:paragraphRange]
+        read_headings = kwargs.fetch(:readHeadings, false)
+        timeout_ms = kwargs.fetch(:timeoutMs, 10_000)
+
         normalized = normalize_url(url)
         uri = URI.parse(normalized)
         markdown = case uri.scheme
         when "http", "https"
-          html = fetch_html(normalized, timeout_ms: timeoutMs.to_i)
+          html = fetch_html(normalized, timeout_ms: timeout_ms.to_i)
           convert_to_markdown(html, normalized)
         when "ftp"
-          content = fetch_ftp(uri, timeout_ms: timeoutMs.to_i)
+          content = fetch_ftp(uri, timeout_ms: timeout_ms.to_i)
           convert_fetched_content(content, normalized)
         when "sftp"
-          content = fetch_sftp(uri, timeout_ms: timeoutMs.to_i)
+          content = fetch_sftp(uri, timeout_ms: timeout_ms.to_i)
           convert_fetched_content(content, normalized)
         when "smb"
-          content = fetch_smb(uri, timeout_ms: timeoutMs.to_i)
+          content = fetch_smb(uri, timeout_ms: timeout_ms.to_i)
           convert_fetched_content(content, normalized)
         when "gemini"
-          gemtext = fetch_gemini(uri, timeout_ms: timeoutMs.to_i)
+          gemtext = fetch_gemini(uri, timeout_ms: timeout_ms.to_i)
           gemtext_to_markdown(gemtext, uri)
         when "ipfs"
           gateway_url = resolve_ipfs_url(uri)
-          html = fetch_html(gateway_url, timeout_ms: timeoutMs.to_i)
+          html = fetch_html(gateway_url, timeout_ms: timeout_ms.to_i)
           convert_to_markdown(html, gateway_url)
         else
           raise ConfigurationError, %(Unsupported URL scheme "#{uri.scheme}". Supported schemes: http, https, ftp, sftp, smb, gemini, ipfs.)
         end
-        apply_options(markdown, start_char: startChar, max_length: maxLength, section: section, paragraph_range: paragraphRange, read_headings: readHeadings)
+        apply_options(markdown, start_char: start_char, max_length: max_length, section: section, paragraph_range: paragraph_range, read_headings: read_headings)
       end
 
       private
