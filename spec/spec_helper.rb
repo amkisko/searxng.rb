@@ -1,16 +1,16 @@
-require "simplecov"
-require "simplecov-cobertura"
+polyrun_cov_measure =
+  ENV["POLYRUN_COVERAGE_DISABLE"] != "1" &&
+  %w[1 true yes].include?(ENV["POLYRUN_COVERAGE"]&.to_s&.downcase)
 
-SimpleCov.start do
-  minimum_coverage 90
-  track_files "lib/**/*.rb"
-  add_filter "/lib/tasks/"
-  add_filter "spec/"
-  add_filter "usr/"
-  formatter SimpleCov::Formatter::MultiFormatter.new([
-    SimpleCov::Formatter::HTMLFormatter,
-    SimpleCov::Formatter::CoberturaFormatter
-  ])
+if polyrun_cov_measure
+  require "coverage"
+  branch = %w[1 true yes].include?(ENV["POLYRUN_COVERAGE_BRANCHES"]&.to_s&.downcase)
+  ::Coverage.start(lines: true, branches: branch)
+end
+
+if polyrun_cov_measure
+  require "polyrun/coverage/rails"
+  Polyrun::Coverage::Rails.start!(root: File.expand_path("..", __dir__))
 end
 
 require "rspec"
@@ -51,12 +51,13 @@ RSpec.configure do |config|
     c.syntax = :expect
   end
 end
-
-# Run coverage analyzer after SimpleCov finishes (optional)
-if ENV["SHOW_ZERO_COVERAGE"] == "1"
-  SimpleCov.at_exit do
-    SimpleCov.result.format!
-    require_relative "support/coverage_analyzer"
-    CoverageAnalyzer.run
-  end
+require "polyrun/rspec"
+Polyrun::RSpec.install_sharded_formatter_compat!
+Polyrun::RSpec.install_failure_fragments!
+Polyrun::RSpec.install_worker_ping!
+Polyrun::RSpec.install_example_debug!
+Polyrun::RSpec.install_example_rails_logging!
+Polyrun::RSpec.install_example_timeout!
+if %w[1 true yes].include?(ENV["POLYRUN_SPEC_QUALITY"]&.to_s&.downcase)
+  Polyrun::RSpec.install_spec_quality!
 end

@@ -1,6 +1,6 @@
 # searxng.rb
 
-[![Gem Version](https://badge.fury.io/rb/searxng.svg?v=0.2.0)](https://badge.fury.io/rb/searxng) [![Test Status](https://github.com/amkisko/searxng.rb/actions/workflows/test.yml/badge.svg)](https://github.com/amkisko/searxng.rb/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/amkisko/searxng.rb/graph/badge.svg)](https://codecov.io/gh/amkisko/searxng.rb)
+[![Gem Version](https://badge.fury.io/rb/searxng.svg?v=0.2.0)](https://badge.fury.io/rb/searxng) [![Test Status](https://github.com/amkisko/searxng.rb/actions/workflows/test.yml/badge.svg)](https://github.com/amkisko/searxng.rb/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/amkisko/searxng.rb/graph/badge.svg)](https://app.codecov.io/github/amkisko/searxng.rb)
 
 Ruby gem providing a SearXNG HTTP client, CLI (search), and MCP (Model Context Protocol) server for web search. Integrates with MCP-compatible clients like Codex, Cursor, Claude, and other MCP-enabled tools.
 
@@ -51,9 +51,11 @@ end
 - **SEARXNG_CA_FILE** / **SEARXNG_CA_PATH** (optional): Custom CA certificate file or directory for HTTPS. You can also pass `ca_file:`, `ca_path:`, or `verify_mode:` to `Searxng::Client.new`.
 - **SEARXNG_USER_AGENT** (optional): Custom User-Agent string. The client sends a default identifying the gem; if your instance returns 403 Forbidden (e.g. bot detection), set a custom User-Agent or pass `user_agent:` to `Searxng::Client.new`.
 - **HTTP_PROXY / HTTPS_PROXY / ALL_PROXY / NO_PROXY** (optional): Proxy configuration for HTTP(S) requests.
-- **FTP_USER / FTP_PASSWORD** (optional): FTP credentials used when URL doesn’t include auth.
-- **SFTP_USER / SFTP_PASSWORD** (optional): SFTP credentials used when URL doesn’t include auth.
-- **SMB_USER / SMB_PASSWORD / SMB_DOMAIN** (optional): SMB credentials/domain used when URL doesn’t include auth.
+- **SEARXNG_WEB_URL_SCHEMES** (optional): Comma-separated protocols enabled for `web_url_read`. The secure default is `http,https,ipfs`; opt in to any required subset of `ftp,sftp,smb,gemini`.
+- **SEARXNG_WEB_URL_CREDENTIAL_HOSTS** (optional): Comma-separated host allowlist permitted to receive credentials from the FTP, SFTP, or SMB environment variables. Credentials embedded directly in a URL remain scoped to that URL.
+- **FTP_USER / FTP_PASSWORD** (optional): FTP credentials used only for hosts in `SEARXNG_WEB_URL_CREDENTIAL_HOSTS`.
+- **SFTP_USER / SFTP_PASSWORD** (optional): SFTP credentials used only for hosts in `SEARXNG_WEB_URL_CREDENTIAL_HOSTS`.
+- **SMB_USER / SMB_PASSWORD / SMB_DOMAIN** (optional): SMB credentials/domain used only for hosts in `SEARXNG_WEB_URL_CREDENTIAL_HOSTS`.
 - **IPFS_GATEWAY** (optional): Gateway used for `ipfs://` URLs (default: `https://ipfs.io`).
 - **GEMINI_INSECURE=1** (optional): disables TLS certificate verification for Gemini fetches in `web_url_read`.
 
@@ -68,7 +70,7 @@ The MCP server provides the following tools:
 2. **web_url_read** - Fetch a URL and return Markdown content
    - Parameters: `url` (required), `startChar`, `maxLength`, `section`, `paragraphRange`, `readHeadings`, `timeoutMs` (all optional).
    - Uses `teplo_core` for HTML/XML to Markdown conversion (with workspace fallback to `textplorer/core-ruby` in development).
-   - Supports `http`, `https`, `ftp`, `sftp`, `smb`, `gemini`, and `ipfs` URLs (`ipfs://` is resolved via `IPFS_GATEWAY`).
+   - Supports `http`, `https`, and `ipfs` by default. `ftp`, `sftp`, `smb`, and `gemini` require explicit opt-in through `SEARXNG_WEB_URL_SCHEMES`.
 
 The MCP server also exposes resources:
 
@@ -166,10 +168,10 @@ Useful for testing the `searxng_web_search` tool before integrating with Cursor 
 ## Protocol Support Notes
 
 - `http` / `https`: fully supported.
-- `ftp`: supported by `web_url_read` (requires `net-ftp` runtime gem).
-- `sftp`: supported by `web_url_read` (requires `net-sftp` runtime gem).
-- `smb`: supported by `web_url_read` via `smbclient` available in `PATH`.
-- `gemini`: supported by `web_url_read` (Gemini fetch + Gemtext to Markdown conversion).
+- `ftp`: opt-in through `SEARXNG_WEB_URL_SCHEMES` (requires the `net-ftp` runtime gem).
+- `sftp`: opt-in through `SEARXNG_WEB_URL_SCHEMES` (requires the `net-sftp` runtime gem).
+- `smb`: opt-in through `SEARXNG_WEB_URL_SCHEMES` and uses `smbclient` available in `PATH`.
+- `gemini`: opt-in through `SEARXNG_WEB_URL_SCHEMES` (Gemini fetch + Gemtext to Markdown conversion).
 - `ipfs`: supported by `web_url_read` through gateway resolution (`ipfs://` -> `IPFS_GATEWAY`).
 - `tor` / `i2p`: supported through `.onion` / `.i2p` hosts over HTTP(S), typically with proxy configuration.
 
@@ -216,6 +218,19 @@ For more information, see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Security
 
 If you discover a security vulnerability, please report it responsibly. See [SECURITY.md](SECURITY.md) for details.
+
+## Links
+
+- [GitHub](https://github.com/amkisko/searxng.rb)
+- [GitLab](https://gitlab.com/amkisko/searxng.rb)
+- [RubyGems](https://rubygems.org/gems/searxng)
+- [Versions Atom](https://rubygems.org/gems/searxng/versions.atom) (feed id `10648244160064`)
+- [libraries.io](https://libraries.io/rubygems/searxng)
+- [Deps.dev](https://deps.dev/rubygems/searxng)
+- [SonarCloud](https://sonarcloud.io/project/overview?id=amkisko_searxng.rb)
+- [Snyk](https://snyk.io/test/github/amkisko/searxng.rb)
+- [Codecov](https://app.codecov.io/github/amkisko/searxng.rb)
+- [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/amkisko/searxng.rb)
 
 ## License
 

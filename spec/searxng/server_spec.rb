@@ -224,12 +224,51 @@ RSpec.describe Searxng::Server do
   describe Searxng::Server::WebUrlReadTool do
     let(:tool) { described_class.new }
 
+    around do |example|
+      original_schemes = ENV["SEARXNG_WEB_URL_SCHEMES"]
+      example.run
+    ensure
+      ENV["SEARXNG_WEB_URL_SCHEMES"] = original_schemes
+    end
+
     before do
       described_class.class_variable_set(:@@url_cache, {})
+      allow(Addrinfo).to receive(:getaddrinfo).and_call_original
+      allow(Addrinfo).to receive(:getaddrinfo)
+        .with("example.com", anything, nil, :STREAM)
+        .and_return([Addrinfo.ip("93.184.216.34")])
     end
 
     it "has tool_name web_url_read" do
       expect(described_class.tool_name).to eq("web_url_read")
+    end
+
+    it "rejects loopback destinations before making a request" do
+      expect { tool.call(url: "http://127.0.0.1/admin") }
+        .to raise_error(Searxng::ConfigurationError, /URL destination is not allowed/)
+      expect(a_request(:get, "http://127.0.0.1/admin")).not_to have_been_made
+    end
+
+    it "disables credential-bearing network protocols by default" do
+      expect { tool.call(url: "sftp://example.com/path/file.txt") }
+        .to raise_error(Searxng::ConfigurationError, /URL scheme "sftp" is not enabled/)
+    end
+
+    it "rejects hostnames that resolve to a private destination" do
+      expect { tool.call(url: "http://localhost/admin") }
+        .to raise_error(Searxng::ConfigurationError, /URL destination is not allowed/)
+      expect(a_request(:get, "http://localhost/admin")).not_to have_been_made
+    end
+
+    it "rejects SMB command separators in remote paths" do
+      ENV["SEARXNG_WEB_URL_SCHEMES"] = "http,https,ipfs,smb"
+      uri = URI("smb://example.com/share/report;recurse%20ON")
+      allow(Searxng::NetworkPolicy).to receive(:validate!).and_return([uri, "93.184.216.34"])
+      allow(Open3).to receive(:capture3)
+
+      expect { tool.call(url: uri.to_s) }
+        .to raise_error(Searxng::ConfigurationError, /SMB path contains unsupported characters/)
+      expect(Open3).not_to have_received(:capture3)
     end
 
     it "supports pagination and section extraction options" do
@@ -250,6 +289,7 @@ RSpec.describe Searxng::Server do
     end
 
     it "routes gemini URLs through gemini fetch + gemtext conversion" do
+      ENV["SEARXNG_WEB_URL_SCHEMES"] = "http,https,ipfs,gemini"
       allow(tool).to receive_messages(fetch_gemini: "# Gemini\n=> /docs Docs", gemtext_to_markdown: "# Gemini\n- [Docs](gemini://example.com/docs)")
 
       result = tool.call(url: "gemini://example.com")
@@ -269,6 +309,7 @@ RSpec.describe Searxng::Server do
     end
 
     it "routes ftp URLs through ftp fetch + content conversion" do
+      ENV["SEARXNG_WEB_URL_SCHEMES"] = "http,https,ipfs,ftp"
       allow(tool).to receive_messages(fetch_ftp: "hello from ftp", convert_fetched_content: "hello from ftp")
 
       result = tool.call(url: "ftp://example.com/path/file.txt")
@@ -278,6 +319,7 @@ RSpec.describe Searxng::Server do
     end
 
     it "routes sftp URLs through sftp fetch + content conversion" do
+      ENV["SEARXNG_WEB_URL_SCHEMES"] = "http,https,ipfs,sftp"
       allow(tool).to receive_messages(fetch_sftp: "hello from sftp", convert_fetched_content: "hello from sftp")
 
       result = tool.call(url: "sftp://user@example.com/path/file.txt")
@@ -287,9 +329,10 @@ RSpec.describe Searxng::Server do
     end
 
     it "routes smb URLs through smb fetch + content conversion" do
+      ENV["SEARXNG_WEB_URL_SCHEMES"] = "http,https,ipfs,smb"
       allow(tool).to receive_messages(fetch_smb: "hello from smb", convert_fetched_content: "hello from smb")
 
-      result = tool.call(url: "smb://fileserver/share/path/file.txt")
+      result = tool.call(url: "smb://example.com/share/path/file.txt")
 
       expect(result).to eq("hello from smb")
       expect(tool).to have_received(:fetch_smb)
@@ -337,6 +380,7 @@ RSpec.describe Searxng::Server do
       response = instance_double(Net::HTTPBadRequest, body: "bad", code: "400", message: "Bad Request")
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
       http = instance_double(Net::HTTP)
+      allow(http).to receive(:ipaddr=)
       allow(http).to receive(:request).and_return(response)
       client = instance_double(Searxng::Client)
       allow(client).to receive(:build_http).and_return(http)
@@ -350,6 +394,7 @@ RSpec.describe Searxng::Server do
       response = instance_double(Net::HTTPOK, body: " ", code: "200", message: "OK")
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
       http = instance_double(Net::HTTP)
+      allow(http).to receive(:ipaddr=)
       allow(http).to receive(:request).and_return(response)
       client = instance_double(Searxng::Client)
       allow(client).to receive(:build_http).and_return(http)
@@ -364,6 +409,7 @@ RSpec.describe Searxng::Server do
       response = instance_double(Net::HTTPOK, body: "<html>ok</html>", code: "200", message: "OK")
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
       http = instance_double(Net::HTTP)
+      allow(http).to receive(:ipaddr=)
       allow(http).to receive(:request).and_return(response)
       client = instance_double(Searxng::Client)
       allow(client).to receive(:build_http).and_return(http)
@@ -378,6 +424,7 @@ RSpec.describe Searxng::Server do
 
     it "raises NetworkError on timeout in fetch_html" do
       http = instance_double(Net::HTTP)
+      allow(http).to receive(:ipaddr=)
       allow(http).to receive(:request) { sleep 0.01 }
       client = instance_double(Searxng::Client)
       allow(client).to receive(:build_http).and_return(http)
@@ -475,6 +522,7 @@ RSpec.describe Searxng::Server do
       allow(ssl).to receive(:respond_to?).with(:hostname=).and_return(true)
       allow(ssl).to receive(:hostname=)
       allow(ssl).to receive(:connect)
+      allow(ssl).to receive(:post_connection_check)
       allow(ssl).to receive(:write)
       allow(ssl).to receive(:gets).with("\r\n").and_return("20 text/gemini\r\n")
       allow(ssl).to receive(:read).and_return("# hello")
@@ -494,6 +542,7 @@ RSpec.describe Searxng::Server do
       allow(OpenSSL::SSL::SSLSocket).to receive(:new).and_return(ssl)
       allow(ssl).to receive(:respond_to?).with(:hostname=).and_return(false)
       allow(ssl).to receive(:connect)
+      allow(ssl).to receive(:post_connection_check)
       allow(ssl).to receive(:write)
       allow(ssl).to receive(:gets).with("\r\n").and_return(nil)
       allow(ssl).to receive(:read).and_return("")
@@ -512,6 +561,7 @@ RSpec.describe Searxng::Server do
       allow(OpenSSL::SSL::SSLSocket).to receive(:new).and_return(ssl)
       allow(ssl).to receive(:respond_to?).with(:hostname=).and_return(false)
       allow(ssl).to receive(:connect)
+      allow(ssl).to receive(:post_connection_check)
       allow(ssl).to receive(:write)
       allow(ssl).to receive(:read).and_return("")
       allow(ssl).to receive(:close)
@@ -538,6 +588,7 @@ RSpec.describe Searxng::Server do
       allow(OpenSSL::SSL::SSLSocket).to receive(:new).and_return(ssl)
       allow(ssl).to receive(:respond_to?).with(:hostname=).and_return(false)
       allow(ssl).to receive(:connect)
+      allow(ssl).to receive(:post_connection_check)
       allow(ssl).to receive(:write)
       allow(ssl).to receive(:gets).with("\r\n").and_return("31 gemini://example.com/new\r\n")
       allow(ssl).to receive(:read).and_return("")
@@ -630,7 +681,7 @@ RSpec.describe Searxng::Server do
         .to raise_error(Searxng::APIError, /must include share and file/)
 
       allow(Open3).to receive(:capture3).and_raise(Errno::ENOENT)
-      expect { tool.send(:fetch_smb, URI.parse("smb://host/share/path/file.txt"), timeout_ms: 1000) }
+      expect { tool.send(:fetch_smb, URI.parse("smb://example.com/share/path/file.txt"), timeout_ms: 1000) }
         .to raise_error(Searxng::ConfigurationError, /smbclient/)
     end
   end

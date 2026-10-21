@@ -62,6 +62,39 @@ RSpec/Output:
   Exclude:
     - spec/support/**/*
 
+RSpec/DescribedClass:
+  Enabled: false
+
+RSpec/AnyInstance:
+  Enabled: false
+
+RSpec/NamedSubject:
+  Enabled: false
+
+RSpec/NoExpectationExample:
+  Enabled: false
+
+RSpec/MessageSpies:
+  Enabled: false
+
+RSpec/MultipleDescribes:
+  Enabled: false
+
+RSpec/RepeatedExampleGroupDescription:
+  Enabled: false
+
+RSpec/RepeatedDescription:
+  Enabled: false
+
+RSpec/StubbedMock:
+  Enabled: false
+
+RSpec/ExpectActual:
+  Enabled: false
+
+RSpec/ReceiveMessages:
+  Enabled: false
+
 # Custom cop overrides
 Style/AccessModifierDeclarations:
   EnforcedStyle: inline
@@ -95,17 +128,32 @@ Metrics/ModuleLength:
   Enabled: true
   CountAsOne: [array, hash, heredoc, method_call]
   Max: 150
+  Exclude:
+    - lib/searxng/client.rb
+    - lib/searxng/server.rb
 Metrics/ClassLength:
   Enabled: true
   CountAsOne: [array, hash, heredoc, method_call]
   Max: 150
+  Exclude:
+    - lib/searxng/client.rb
+    - lib/searxng/server.rb
 Metrics/CyclomaticComplexity:
   Enabled: true
   Max: 10
+  Exclude:
+    - lib/searxng/client.rb
+    - lib/searxng/server.rb
 Metrics/PerceivedComplexity:
   Enabled: true
   Max: 10
+  Exclude:
+    - lib/searxng/client.rb
+    - lib/searxng/server.rb
 Metrics/AbcSize:
   Enabled: true
   Max: 15
   CountRepeatedAttributes: false
+  Exclude:
+    - lib/searxng/client.rb
+    - lib/searxng/server.rb

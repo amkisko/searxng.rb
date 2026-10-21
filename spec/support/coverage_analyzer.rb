@@ -19,19 +19,9 @@ module CoverageAnalyzer
     return unless ENV["SHOW_ZERO_COVERAGE"] == "1"
 
     wait_for_coverage_file
+    return warn_missing_coverage_file unless File.exist?(COVERAGE_XML_PATH)
 
-    unless File.exist?(COVERAGE_XML_PATH)
-      warn "⚠️  Coverage XML not found at #{COVERAGE_XML_PATH}"
-      warn "   Run rspec first to generate coverage data"
-      return
-    end
-
-    uncovered = extract_uncovered_lines
-    return if uncovered.empty?
-
-    uncovered.sort_by { |e| [e[:file], e[:line]] }.each do |line_info|
-      puts "#{line_info[:file]}:#{line_info[:line]}"
-    end
+    print_uncovered_lines(extract_uncovered_lines)
   end
 
   def self.wait_for_coverage_file
@@ -44,24 +34,43 @@ module CoverageAnalyzer
     end
   end
 
-  def self.extract_uncovered_lines
-    uncovered = []
-    xml_content = File.read(COVERAGE_XML_PATH)
-    doc = REXML::Document.new(xml_content)
-
-    doc.elements.each("//class") do |class_elem|
-      filename = class_elem.attributes["filename"]
-      next unless filename&.start_with?("lib/")
-
-      class_elem.elements.each("lines/line") do |line_elem|
-        hits = line_elem.attributes["hits"].to_i
-        line_num = line_elem.attributes["number"].to_i
-        uncovered << {file: filename, line: line_num} if hits == 0
-      end
-    end
-
-    uncovered
+  def self.warn_missing_coverage_file
+    warn "⚠️  Coverage XML not found at #{COVERAGE_XML_PATH}"
+    warn "   Run rspec first to generate coverage data"
   end
 
-  private_class_method :wait_for_coverage_file, :extract_uncovered_lines
+  def self.print_uncovered_lines(uncovered_lines)
+    return if uncovered_lines.empty?
+
+    uncovered_lines.sort_by { |entry| [entry[:file], entry[:line]] }.each do |line_information|
+      puts "#{line_information[:file]}:#{line_information[:line]}"
+    end
+  end
+
+  def self.extract_uncovered_lines
+    uncovered_lines = []
+    coverage_document = REXML::Document.new(File.read(COVERAGE_XML_PATH))
+    coverage_document.elements.each("//class") do |class_element|
+      append_uncovered_from_class(uncovered_lines, class_element)
+    end
+    uncovered_lines
+  end
+
+  def self.append_uncovered_from_class(uncovered_lines, class_element)
+    filename = class_element.attributes["filename"]
+    return unless filename&.start_with?("lib/")
+
+    class_element.elements.each("lines/line") do |line_element|
+      append_uncovered_line(uncovered_lines, filename, line_element)
+    end
+  end
+
+  def self.append_uncovered_line(uncovered_lines, filename, line_element)
+    return unless line_element.attributes["hits"].to_i.zero?
+
+    uncovered_lines << {file: filename, line: line_element.attributes["number"].to_i}
+  end
+
+  private_class_method :wait_for_coverage_file, :warn_missing_coverage_file, :print_uncovered_lines,
+    :extract_uncovered_lines, :append_uncovered_from_class, :append_uncovered_line
 end

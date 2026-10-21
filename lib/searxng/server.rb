@@ -8,6 +8,7 @@ require "socket"
 require "time"
 require "timeout"
 require "uri"
+require "searxng/network_policy"
 
 FastMcp = MCP unless defined?(FastMcp)
 
@@ -176,6 +177,8 @@ module Searxng
       annotations(readOnlyHint: true, openWorldHint: true) if respond_to?(:annotations)
 
       CACHE_TTL_SECONDS = 300
+      DEFAULT_URL_SCHEMES = %w[http https ipfs].freeze
+      SUPPORTED_URL_SCHEMES = %w[http https ftp sftp smb gemini ipfs].freeze
       @@url_cache = {} # rubocop:disable Style/ClassVars
 
       arguments do
@@ -198,21 +201,29 @@ module Searxng
 
         normalized = normalize_url(url)
         uri = URI.parse(normalized)
+        ensure_scheme_enabled!(uri.scheme)
+        unless uri.scheme == "ipfs"
+          _validated_uri, ip_address = NetworkPolicy.validate!(
+            normalized,
+            allowed_schemes: [uri.scheme],
+            allow_userinfo: !%w[http https].include?(uri.scheme)
+          )
+        end
         markdown = case uri.scheme
         when "http", "https"
           html = fetch_html(normalized, timeout_ms: timeout_ms.to_i)
           convert_to_markdown(html, normalized)
         when "ftp"
-          content = fetch_ftp(uri, timeout_ms: timeout_ms.to_i)
+          content = fetch_ftp(uri, ip_address: ip_address, timeout_ms: timeout_ms.to_i)
           convert_fetched_content(content, normalized)
         when "sftp"
-          content = fetch_sftp(uri, timeout_ms: timeout_ms.to_i)
+          content = fetch_sftp(uri, ip_address: ip_address, timeout_ms: timeout_ms.to_i)
           convert_fetched_content(content, normalized)
         when "smb"
-          content = fetch_smb(uri, timeout_ms: timeout_ms.to_i)
+          content = fetch_smb(uri, ip_address: ip_address, timeout_ms: timeout_ms.to_i)
           convert_fetched_content(content, normalized)
         when "gemini"
-          gemtext = fetch_gemini(uri, timeout_ms: timeout_ms.to_i)
+          gemtext = fetch_gemini(uri, ip_address: ip_address, timeout_ms: timeout_ms.to_i)
           gemtext_to_markdown(gemtext, uri)
         when "ipfs"
           gateway_url = resolve_ipfs_url(uri)
@@ -245,6 +256,19 @@ module Searxng
         raise ConfigurationError, %(URL Format Error: Invalid URL "#{url}")
       end
 
+      def ensure_scheme_enabled!(scheme)
+        return if enabled_url_schemes.include?(scheme)
+
+        raise ConfigurationError, %(URL scheme "#{scheme}" is not enabled)
+      end
+
+      def enabled_url_schemes
+        configured = ENV["SEARXNG_WEB_URL_SCHEMES"]
+        return DEFAULT_URL_SCHEMES unless configured
+
+        configured.split(",").map { |scheme| scheme.strip.downcase } & SUPPORTED_URL_SCHEMES
+      end
+
       def fetch_html(url, timeout_ms:)
         now = Time.now.to_i
         cached = @@url_cache[url]
@@ -252,9 +276,10 @@ module Searxng
           return cached[:html]
         end
 
-        uri = URI.parse(url)
+        uri, ip_address = NetworkPolicy.validate!(url, allowed_schemes: %w[http https])
         client = get_client
         http = client.send(:build_http, uri)
+        http.ipaddr = ip_address
         request = Net::HTTP::Get.new(uri)
         request["User-Agent"] = "searxng-ruby/#{Searxng::VERSION} web_url_read"
         response = nil
@@ -302,22 +327,23 @@ module Searxng
         looks_like_markup ? convert_to_markdown(text, base_url) : text
       end
 
-      def fetch_ftp(uri, timeout_ms:)
+      def fetch_ftp(uri, timeout_ms:, ip_address: nil)
         begin
           require "net/ftp"
         rescue LoadError
           raise ConfigurationError, "FTP support requires the 'net-ftp' gem."
         end
 
+        ip_address ||= validated_ip_address(uri, allow_userinfo: true)
         body = +""
         Timeout.timeout(timeout_ms / 1000.0) do
           ftp = Net::FTP.new
           begin
-            ftp.connect(uri.host, uri.port || 21)
+            ftp.connect(ip_address, uri.port || 21)
             ftp.read_timeout = [timeout_ms / 1000.0, 1.0].max
             ftp.open_timeout = [timeout_ms / 1000.0, 1.0].max
-            user = uri.user || ENV["FTP_USER"] || "anonymous"
-            pass = uri.password || ENV["FTP_PASSWORD"] || "anonymous@"
+            user = uri.user || credential_for(uri.host, "FTP_USER") || "anonymous"
+            pass = uri.password || credential_for(uri.host, "FTP_PASSWORD") || "anonymous@"
             ftp.login(user, pass)
             path = uri.path.to_s
             raise APIError.new("FTP path is required", uri: uri.to_s) if path.empty? || path == "/"
@@ -339,15 +365,16 @@ module Searxng
         raise e
       end
 
-      def fetch_sftp(uri, timeout_ms:)
+      def fetch_sftp(uri, timeout_ms:, ip_address: nil)
         begin
           require "net/sftp"
         rescue LoadError
           raise ConfigurationError, "SFTP support requires the 'net-sftp' gem."
         end
 
-        user = uri.user || ENV["SFTP_USER"]
-        password = uri.password || ENV["SFTP_PASSWORD"]
+        ip_address ||= validated_ip_address(uri, allow_userinfo: true)
+        user = uri.user || credential_for(uri.host, "SFTP_USER")
+        password = uri.password || credential_for(uri.host, "SFTP_PASSWORD")
         raise ConfigurationError, "SFTP requires username (sftp://user@host/path or SFTP_USER)." unless user
 
         path = uri.path.to_s
@@ -355,7 +382,7 @@ module Searxng
 
         result = nil
         Timeout.timeout(timeout_ms / 1000.0) do
-          Net::SFTP.start(uri.host, user, password: password, port: uri.port || 22, non_interactive: true, verify_host_key: :never) do |sftp|
+          Net::SFTP.start(ip_address, user, password: password, port: uri.port || 22, non_interactive: true, verify_host_key: :always) do |sftp|
             result = sftp.download!(path)
           end
         end
@@ -376,11 +403,12 @@ module Searxng
         raise APIError.new("SFTP Error: #{e.message}", uri: uri.to_s)
       end
 
-      def fetch_smb(uri, timeout_ms:)
+      def fetch_smb(uri, timeout_ms:, ip_address: nil)
+        ip_address ||= validated_ip_address(uri, allow_userinfo: true)
         share, remote_path = parse_smb_path(uri)
-        user = uri.user || ENV["SMB_USER"]
-        pass = uri.password || ENV["SMB_PASSWORD"]
-        domain = ENV["SMB_DOMAIN"]
+        user = uri.user || credential_for(uri.host, "SMB_USER")
+        pass = uri.password || credential_for(uri.host, "SMB_PASSWORD")
+        domain = credential_for(uri.host, "SMB_DOMAIN")
 
         auth = if user
           full_user = (domain && !domain.empty?) ? "#{domain}\\#{user}" : user
@@ -388,7 +416,7 @@ module Searxng
         end
 
         escaped_remote = remote_path.gsub('"', '\"')
-        cmd = ["smbclient", "//#{uri.host}/#{share}", "-c", %(get "#{escaped_remote}" -)]
+        cmd = ["smbclient", "//#{ip_address}/#{share}", "-c", %(get "#{escaped_remote}" -)]
         if auth
           cmd << "-U" << auth
         else
@@ -418,21 +446,26 @@ module Searxng
         share = segments.shift
         remote = segments.join("/")
         raise APIError.new("SMB path must include share and file (smb://host/share/path/file)", uri: uri.to_s) if share.to_s.empty? || remote.empty?
+        if share.match?(/[\x00-\x1f\x7f;"\\]/) || remote.match?(/[\x00-\x1f\x7f;"\\]/)
+          raise ConfigurationError, "SMB path contains unsupported characters"
+        end
 
         [share, remote]
       end
 
-      def fetch_gemini(uri, timeout_ms:)
+      def fetch_gemini(uri, timeout_ms:, ip_address: nil)
+        ip_address ||= validated_ip_address(uri)
         response_header = nil
         body = +""
         Timeout.timeout(timeout_ms / 1000.0) do
-          tcp = TCPSocket.new(uri.host, uri.port || 1965)
+          tcp = TCPSocket.new(ip_address, uri.port || 1965)
           begin
             ctx = OpenSSL::SSL::SSLContext.new
             ctx.verify_mode = (ENV["GEMINI_INSECURE"] == "1") ? OpenSSL::SSL::VERIFY_NONE : OpenSSL::SSL::VERIFY_PEER
             ssl = OpenSSL::SSL::SSLSocket.new(tcp, ctx)
             ssl.hostname = uri.host if ssl.respond_to?(:hostname=)
             ssl.connect
+            ssl.post_connection_check(uri.host)
             ssl.write("#{uri}\r\n")
             response_header = ssl.gets("\r\n")
             body = ssl.read.to_s
@@ -516,6 +549,21 @@ module Searxng
         "#{gateway}/ipfs/#{cid}#{path}#{query}"
       rescue URI::InvalidURIError
         raise ConfigurationError, "IPFS_GATEWAY has invalid format: #{gateway.inspect}"
+      end
+
+      def credential_for(host, variable)
+        allowed_hosts = ENV["SEARXNG_WEB_URL_CREDENTIAL_HOSTS"].to_s
+          .split(",")
+          .map { |candidate| candidate.strip.downcase }
+        ENV[variable] if allowed_hosts.include?(host.downcase)
+      end
+
+      def validated_ip_address(uri, allow_userinfo: false)
+        NetworkPolicy.validate!(
+          uri.to_s,
+          allowed_schemes: [uri.scheme],
+          allow_userinfo: allow_userinfo
+        )[1]
       end
 
       def load_teplo_core!
@@ -672,18 +720,20 @@ module Searxng
           - `HTTP_PROXY` / `HTTPS_PROXY`
           - `ALL_PROXY` (for shared proxy config)
           - `NO_PROXY`
-          - `FTP_USER` / `FTP_PASSWORD` (optional FTP credentials)
-          - `SFTP_USER` / `SFTP_PASSWORD` (optional SFTP credentials)
-          - `SMB_USER` / `SMB_PASSWORD` / `SMB_DOMAIN` (optional SMB credentials)
+          - `SEARXNG_WEB_URL_SCHEMES` (comma-separated opt-in protocols; default: `http,https,ipfs`)
+          - `SEARXNG_WEB_URL_CREDENTIAL_HOSTS` (comma-separated hosts allowed to receive environment credentials)
+          - `FTP_USER` / `FTP_PASSWORD` (optional credentials for allowlisted hosts)
+          - `SFTP_USER` / `SFTP_PASSWORD` (optional credentials for allowlisted hosts)
+          - `SMB_USER` / `SMB_PASSWORD` / `SMB_DOMAIN` (optional credentials for allowlisted hosts)
           - `IPFS_GATEWAY` (default: `https://ipfs.io`)
           - `GEMINI_INSECURE=1` (optional, disables TLS verification for Gemini)
 
           ## Protocol Notes
           - `http` / `https`: fully supported (`searxng_web_search` + `web_url_read`)
-          - `ftp`: supported in `web_url_read` (file retrieval via FTP)
-          - `sftp`: supported in `web_url_read` (requires `net-sftp` gem)
-          - `smb`: supported in `web_url_read` via `smbclient` command
-          - `gemini`: supported in `web_url_read` (Gemini fetch + Gemtext conversion)
+          - `ftp`: opt-in through `SEARXNG_WEB_URL_SCHEMES` (file retrieval via FTP)
+          - `sftp`: opt-in through `SEARXNG_WEB_URL_SCHEMES` (requires `net-sftp` gem)
+          - `smb`: opt-in through `SEARXNG_WEB_URL_SCHEMES` via `smbclient`
+          - `gemini`: opt-in through `SEARXNG_WEB_URL_SCHEMES` (Gemini fetch + Gemtext conversion)
           - `ipfs`: supported via HTTP gateway mapping (`ipfs://...` -> `IPFS_GATEWAY`)
           - `tor` / `i2p`: supported via `.onion` / `.i2p` hosts over HTTP(S) with proxy configuration
           - `socks5`: configure via proxy environment and run through a local bridge/proxy compatible with your client setup

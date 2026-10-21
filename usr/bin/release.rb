@@ -1,4 +1,5 @@
 #!/usr/bin/env ruby
+require_relative "../lib/release_version_check"
 
 def execute_command(command)
   green = "\033[0;32m"
@@ -16,7 +17,7 @@ execute_command("bundle install")
 execute_command("bundle exec appraisal generate")
 execute_command("bundle exec rubocop -a 2>&1 | tee tmp/rubocop.log")
 execute_command("bundle exec rbs validate")
-execute_command("bundle exec rspec 2>&1 | tee tmp/rspec.log")
+execute_command("POLYRUN_COVERAGE=1 bundle exec polyrun parallel-rspec --workers 5 --merge-failures 2>&1 | tee tmp/polyrun-rspec.log")
 
 puts "Tests passed. Checking git status..."
 
@@ -32,6 +33,8 @@ version_file = "lib/searxng/version.rb"
 version_content = File.read(version_file)
 version = version_content.match(/VERSION\s*=\s*"([0-9.]+)"/)[1]
 gem_file = "#{gem_name}-#{version}.gem"
+
+ReleaseVersionCheck.warn_if_already_released(version: version, package_name: gem_name, registry: :rubygems)
 
 execute_command("gem build #{gem_name}.gemspec")
 
