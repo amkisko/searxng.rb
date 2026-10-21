@@ -24,9 +24,13 @@ module Searxng
       user_agent: nil,
       configure_http: nil
     )
-      @base_url = (base_url || ENV["SEARXNG_URL"] || DEFAULT_BASE_URL).to_s.chomp("/")
-      @user = user || ENV["SEARXNG_USER"] || ENV["AUTH_USERNAME"]
-      @password = password || ENV["SEARXNG_PASSWORD"] || ENV["AUTH_PASSWORD"]
+      @base_url = if base_url.nil?
+        present_string(ENV["SEARXNG_URL"]) || DEFAULT_BASE_URL
+      else
+        base_url.to_s.strip
+      end.chomp("/")
+      @user = present_string(user) || present_string(ENV["SEARXNG_USER"]) || present_string(ENV["AUTH_USERNAME"])
+      @password = present_string(password) || present_string(ENV["SEARXNG_PASSWORD"]) || present_string(ENV["AUTH_PASSWORD"])
       @open_timeout = open_timeout
       @read_timeout = read_timeout
       @ca_file = ca_file || ENV["SEARXNG_CA_FILE"]
@@ -49,11 +53,28 @@ module Searxng
     def build_search_uri(query, pageno:, time_range:, language:, safesearch:)
       uri = URI.join("#{@base_url}/", "search")
       params = {"q" => query, "format" => "json", "pageno" => pageno.to_s}
-      params["time_range"] = time_range if time_range && VALID_TIME_RANGES.include?(time_range.to_s)
+      if time_range
+        range = time_range.to_s
+        unless VALID_TIME_RANGES.include?(range)
+          raise ConfigurationError, "Invalid time_range: #{time_range.inspect} (allowed: #{VALID_TIME_RANGES.join(", ")})"
+        end
+        params["time_range"] = range
+      end
       params["language"] = language if language && language != "all"
-      params["safesearch"] = safesearch.to_s if safesearch && VALID_SAFESEARCH.include?(safesearch.to_i)
+      unless safesearch.nil?
+        value = Integer(safesearch, exception: false)
+        unless value && VALID_SAFESEARCH.include?(value)
+          raise ConfigurationError, "Invalid safesearch: #{safesearch.inspect} (allowed: #{VALID_SAFESEARCH.join(", ")})"
+        end
+        params["safesearch"] = value.to_s
+      end
       uri.query = URI.encode_www_form(params)
       uri
+    end
+
+    def present_string(value)
+      text = value&.to_s&.strip
+      text unless text.nil? || text.empty?
     end
 
     def perform_request(uri)
@@ -136,8 +157,8 @@ module Searxng
       return nil if raw.nil? || raw.strip.empty?
 
       URI(raw.include?("://") ? raw : "http://#{raw}")
-    rescue
-      nil
+    rescue URI::InvalidURIError, ArgumentError
+      raise ConfigurationError, "Proxy URL is invalid: #{raw.inspect}"
     end
 
     def no_proxy_match?(host)

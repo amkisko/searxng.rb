@@ -1,12 +1,12 @@
 # searxng.rb
 
-[![Gem Version](https://badge.fury.io/rb/searxng.svg?v=0.2.0)](https://badge.fury.io/rb/searxng) [![Test Status](https://github.com/amkisko/searxng.rb/actions/workflows/test.yml/badge.svg)](https://github.com/amkisko/searxng.rb/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/amkisko/searxng.rb/graph/badge.svg)](https://app.codecov.io/github/amkisko/searxng.rb)
+[![Gem Version](https://badge.fury.io/rb/searxng.svg?v=0.2.1)](https://badge.fury.io/rb/searxng) [![Test Status](https://github.com/amkisko/searxng.rb/actions/workflows/test.yml/badge.svg)](https://github.com/amkisko/searxng.rb/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/amkisko/searxng.rb/graph/badge.svg)](https://app.codecov.io/github/amkisko/searxng.rb)
 
 Ruby gem providing a SearXNG HTTP client, CLI (search), and MCP (Model Context Protocol) server for web search. Integrates with MCP-compatible clients like Codex, Cursor, Claude, and other MCP-enabled tools.
 
 ## Requirements
 
-- **Ruby 3.1 or higher** (Ruby 3.0 and earlier are not supported). For managing Ruby versions, [rbenv](https://github.com/rbenv/rbenv) or [mise](https://mise.jdx.dev/) are recommended; system Ruby may be sufficient if it meets the version requirement.
+- **Ruby 3.4 or higher**. For managing Ruby versions, [rbenv](https://github.com/rbenv/rbenv) or [mise](https://mise.jdx.dev/) are recommended; system Ruby may be sufficient if it meets the version requirement.
 
 ## Quick Start
 
@@ -173,7 +173,7 @@ Useful for testing the `searxng_web_search` tool before integrating with Cursor 
 - `smb`: opt-in through `SEARXNG_WEB_URL_SCHEMES` and uses `smbclient` available in `PATH`.
 - `gemini`: opt-in through `SEARXNG_WEB_URL_SCHEMES` (Gemini fetch + Gemtext to Markdown conversion).
 - `ipfs`: supported by `web_url_read` through gateway resolution (`ipfs://` -> `IPFS_GATEWAY`).
-- `tor` / `i2p`: supported through `.onion` / `.i2p` hosts over HTTP(S), typically with proxy configuration.
+- `.onion` / `.i2p`: not supported by `web_url_read` (destination policy resolves hosts locally before any proxy).
 
 ## Examples
 

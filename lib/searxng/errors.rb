@@ -70,5 +70,13 @@ module Searxng
         "SearXNG returned #{status_code} #{status_message}".strip
       end
     end
+
+    def fetch_http_error(status_code, status_message, location: nil)
+      code = status_code.to_i
+      base = "Website Error (#{code}): #{status_message}".strip
+      return "#{base} Location: #{location}" if location && !location.to_s.strip.empty?
+
+      base
+    end
   end
 end

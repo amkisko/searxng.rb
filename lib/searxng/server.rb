@@ -177,27 +177,35 @@ module Searxng
       annotations(readOnlyHint: true, openWorldHint: true) if respond_to?(:annotations)
 
       CACHE_TTL_SECONDS = 300
+      CACHE_MAX_ENTRIES = 32
+      CACHE_MAX_BYTES = 8 * 1024 * 1024
+      MAX_FETCH_BYTES = 2 * 1024 * 1024
+      DEFAULT_MAX_LENGTH = 20_000
+      MIN_TIMEOUT_MS = 1_000
+      MAX_TIMEOUT_MS = 30_000
       DEFAULT_URL_SCHEMES = %w[http https ipfs].freeze
       SUPPORTED_URL_SCHEMES = %w[http https ftp sftp smb gemini ipfs].freeze
       @@url_cache = {} # rubocop:disable Style/ClassVars
+      @@url_cache_bytes = 0 # rubocop:disable Style/ClassVars
+      @@url_cache_mutex = Mutex.new # rubocop:disable Style/ClassVars
 
       arguments do
         required(:url).filled(:string).description("URL to fetch and read")
         optional(:startChar).filled(:integer).description("Starting character position (default: 0)")
-        optional(:maxLength).filled(:integer).description("Maximum characters to return")
+        optional(:maxLength).filled(:integer).description("Maximum characters to return (default: 20000)")
         optional(:section).filled(:string).description("Extract by heading text")
         optional(:paragraphRange).filled(:string).description("Paragraph range, e.g. '1-5', '3', '10-'")
         optional(:readHeadings).filled(:bool).description("Return only headings when true")
-        optional(:timeoutMs).filled(:integer).description("Request timeout in ms (default: 10000)")
+        optional(:timeoutMs).filled(:integer).description("Request timeout in ms (default: 10000, clamped 1000..30000)")
       end
 
       def call(url:, **kwargs)
         start_char = kwargs.fetch(:startChar, 0)
-        max_length = kwargs[:maxLength]
+        max_length = kwargs.fetch(:maxLength, DEFAULT_MAX_LENGTH)
         section = kwargs[:section]
         paragraph_range = kwargs[:paragraphRange]
         read_headings = kwargs.fetch(:readHeadings, false)
-        timeout_ms = kwargs.fetch(:timeoutMs, 10_000)
+        timeout_ms = clamp_timeout_ms(kwargs.fetch(:timeoutMs, 10_000))
 
         normalized = normalize_url(url)
         uri = URI.parse(normalized)
@@ -211,28 +219,30 @@ module Searxng
         end
         markdown = case uri.scheme
         when "http", "https"
-          html = fetch_html(normalized, timeout_ms: timeout_ms.to_i)
-          convert_to_markdown(html, normalized)
+          html = fetch_html(normalized, timeout_ms: timeout_ms)
+          convert_to_markdown(html, redact_uri_string(normalized))
         when "ftp"
-          content = fetch_ftp(uri, ip_address: ip_address, timeout_ms: timeout_ms.to_i)
-          convert_fetched_content(content, normalized)
+          content = fetch_ftp(uri, ip_address: ip_address, timeout_ms: timeout_ms)
+          convert_fetched_content(content, redact_uri_string(normalized))
         when "sftp"
-          content = fetch_sftp(uri, ip_address: ip_address, timeout_ms: timeout_ms.to_i)
-          convert_fetched_content(content, normalized)
+          content = fetch_sftp(uri, ip_address: ip_address, timeout_ms: timeout_ms)
+          convert_fetched_content(content, redact_uri_string(normalized))
         when "smb"
-          content = fetch_smb(uri, ip_address: ip_address, timeout_ms: timeout_ms.to_i)
-          convert_fetched_content(content, normalized)
+          content = fetch_smb(uri, ip_address: ip_address, timeout_ms: timeout_ms)
+          convert_fetched_content(content, redact_uri_string(normalized))
         when "gemini"
-          gemtext = fetch_gemini(uri, ip_address: ip_address, timeout_ms: timeout_ms.to_i)
+          gemtext = fetch_gemini(uri, ip_address: ip_address, timeout_ms: timeout_ms)
           gemtext_to_markdown(gemtext, uri)
         when "ipfs"
           gateway_url = resolve_ipfs_url(uri)
-          html = fetch_html(gateway_url, timeout_ms: timeout_ms.to_i)
+          html = fetch_html(gateway_url, timeout_ms: timeout_ms)
           convert_to_markdown(html, gateway_url)
         else
           raise ConfigurationError, %(Unsupported URL scheme "#{uri.scheme}". Supported schemes: http, https, ftp, sftp, smb, gemini, ipfs.)
         end
         apply_options(markdown, start_char: start_char, max_length: max_length, section: section, paragraph_range: paragraph_range, read_headings: read_headings)
+      rescue Searxng::Error => e
+        "Error: #{e.message}"
       end
 
       private
@@ -269,41 +279,132 @@ module Searxng
         configured.split(",").map { |scheme| scheme.strip.downcase } & SUPPORTED_URL_SCHEMES
       end
 
+      def clamp_timeout_ms(value)
+        value.to_i.clamp(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)
+      end
+
+      def redact_uri_string(url)
+        uri = url.is_a?(URI) ? url.dup : URI.parse(url.to_s)
+        uri.user = nil
+        uri.password = nil
+        uri.to_s
+      rescue URI::InvalidURIError
+        "(invalid URL)"
+      end
+
       def fetch_html(url, timeout_ms:)
         now = Time.now.to_i
-        cached = @@url_cache[url]
-        if cached && (now - cached[:at] <= CACHE_TTL_SECONDS)
-          return cached[:html]
-        end
+        cached = cache_get(url, now: now)
+        return cached if cached
 
         uri, ip_address = NetworkPolicy.validate!(url, allowed_schemes: %w[http https])
         client = get_client
-        http = client.send(:build_http, uri)
-        http.ipaddr = ip_address
-        request = Net::HTTP::Get.new(uri)
-        request["User-Agent"] = "searxng-ruby/#{Searxng::VERSION} web_url_read"
-        response = nil
-        Timeout.timeout(timeout_ms / 1000.0) { response = http.request(request) }
-        unless response.is_a?(Net::HTTPSuccess)
-          raise APIError.new(
-            ErrorMessages.api_error(response.code.to_i, response.message),
-            status_code: response.code.to_i,
-            response_data: response.body,
-            uri: url
-          )
+        http = build_fetch_http(client, uri, ip_address, timeout_ms: timeout_ms)
+        request = Net::HTTP::Get.new(uri.request_uri)
+        request["Host"] = uri.hostname || uri.host
+        request["User-Agent"] = ENV["SEARXNG_USER_AGENT"].to_s.strip.empty? ? "searxng-ruby/#{Searxng::VERSION} web_url_read" : ENV["SEARXNG_USER_AGENT"]
+        request["Accept-Encoding"] = "identity"
+        safe_url = redact_uri_string(url)
+        body = nil
+        status_code = nil
+        status_message = nil
+        location = nil
+        Timeout.timeout(timeout_ms / 1000.0) do
+          http.request(request) do |response|
+            status_code = response.code.to_i
+            status_message = response.message
+            location = response["location"]
+            unless response.is_a?(Net::HTTPSuccess)
+              read_limited_body(response)
+              raise APIError.new(
+                ErrorMessages.fetch_http_error(status_code, status_message, location: location),
+                status_code: status_code,
+                uri: safe_url
+              )
+            end
+            body = read_limited_body(response)
+          end
+        end
+        if body.to_s.strip.empty?
+          raise APIError.new("Content Error: Website returned empty content.", status_code: status_code, uri: safe_url)
         end
 
-        body = response.body.to_s
-        if body.strip.empty?
-          raise APIError.new("Content Error: Website returned empty content.", status_code: response.code.to_i, uri: url)
-        end
-
-        @@url_cache[url] = {at: now, html: body}
+        cache_put(url, body, at: now)
         body
       rescue Timeout::Error
         raise NetworkError, "Timeout Error: #{URI.parse(url).host} took longer than #{timeout_ms}ms to respond"
       rescue SocketError, Errno::ECONNREFUSED, Errno::ETIMEDOUT, Errno::ECONNRESET, Errno::EPIPE, OpenSSL::SSL::SSLError, EOFError => e
         raise NetworkError, ErrorMessages.network_error(e, uri: URI.parse(url), target: "website")
+      end
+
+      def build_fetch_http(client, uri, ip_address, timeout_ms:)
+        proxy_uri = client.send(:proxy_uri_for, uri)
+        seconds = [timeout_ms / 1000.0, 1.0].max
+        if proxy_uri && uri.scheme == "http"
+          http = Net::HTTP::Proxy(proxy_uri.host, proxy_uri.port, proxy_uri.user, proxy_uri.password)
+            .new(ip_address, uri.port)
+          http.open_timeout = seconds
+          http.read_timeout = seconds
+          http.max_retries = 0 if http.respond_to?(:max_retries=)
+          return http
+        end
+
+        http = client.send(:build_http, uri)
+        http.ipaddr = ip_address
+        http.open_timeout = seconds
+        http.read_timeout = seconds
+        http.max_retries = 0 if http.respond_to?(:max_retries=)
+        http
+      end
+
+      def read_limited_body(response)
+        body = +""
+        response.read_body do |chunk|
+          body << chunk
+          if body.bytesize > MAX_FETCH_BYTES
+            raise APIError.new("Content Error: response exceeds #{MAX_FETCH_BYTES} bytes", uri: nil)
+          end
+        end
+        body
+      end
+
+      def cache_get(url, now:)
+        @@url_cache_mutex.synchronize do
+          purge_expired_cache!(now)
+          entry = @@url_cache[url]
+          (entry && (now - entry[:at] <= CACHE_TTL_SECONDS)) ? entry[:html] : nil
+        end
+      end
+
+      def cache_put(url, html, at:)
+        @@url_cache_mutex.synchronize do
+          purge_expired_cache!(at)
+          while (@@url_cache.size >= CACHE_MAX_ENTRIES || (@@url_cache_bytes + html.bytesize) > CACHE_MAX_BYTES) && !@@url_cache.empty?
+            evict_oldest_cache_entry!
+          end
+          return if html.bytesize > CACHE_MAX_BYTES
+
+          previous = @@url_cache[url]
+          @@url_cache_bytes -= previous[:html].bytesize if previous
+          @@url_cache[url] = {at: at, html: html}
+          @@url_cache_bytes += html.bytesize
+        end
+      end
+
+      def purge_expired_cache!(now)
+        @@url_cache.delete_if do |_key, entry|
+          expired = now - entry[:at] > CACHE_TTL_SECONDS
+          @@url_cache_bytes -= entry[:html].bytesize if expired
+          expired
+        end
+      end
+
+      def evict_oldest_cache_entry!
+        oldest_key, oldest = @@url_cache.min_by { |_key, entry| entry[:at] }
+        return unless oldest_key
+
+        @@url_cache_bytes -= oldest[:html].bytesize
+        @@url_cache.delete(oldest_key)
       end
 
       def convert_to_markdown(html, base_url)
@@ -315,6 +416,8 @@ module Searxng
         else
           markdown
         end
+      rescue Searxng::Error
+        raise
       rescue => e
         raise APIError.new("Conversion Error: Cannot convert HTML to Markdown (#{base_url}) - #{e.message}", uri: base_url)
       end
@@ -336,8 +439,12 @@ module Searxng
 
         ip_address ||= validated_ip_address(uri, allow_userinfo: true)
         body = +""
+        ftp = nil
+        safe_uri = redact_uri_string(uri)
         Timeout.timeout(timeout_ms / 1000.0) do
           ftp = Net::FTP.new
+          ftp.passive = true
+          ftp.use_pasv_ip = false if ftp.respond_to?(:use_pasv_ip=)
           begin
             ftp.connect(ip_address, uri.port || 21)
             ftp.read_timeout = [timeout_ms / 1000.0, 1.0].max
@@ -345,12 +452,18 @@ module Searxng
             user = uri.user || credential_for(uri.host, "FTP_USER") || "anonymous"
             pass = uri.password || credential_for(uri.host, "FTP_PASSWORD") || "anonymous@"
             ftp.login(user, pass)
-            path = uri.path.to_s
-            raise APIError.new("FTP path is required", uri: uri.to_s) if path.empty? || path == "/"
+            path = URI.decode_www_form_component(uri.path.to_s)
+            raise APIError.new("FTP path is required", uri: safe_uri) if path.empty? || path == "/"
+            raise ConfigurationError, "FTP path contains unsupported characters" if path.match?(/[\r\n\x00]/)
 
-            ftp.retrbinary("RETR #{path}", 16_384) { |chunk| body << chunk }
+            ftp.retrbinary("RETR #{path}", 16_384) do |chunk|
+              body << chunk
+              if body.bytesize > MAX_FETCH_BYTES
+                raise APIError.new("Content Error: response exceeds #{MAX_FETCH_BYTES} bytes", uri: safe_uri)
+              end
+            end
           ensure
-            ftp.close unless ftp.closed?
+            ftp&.close unless ftp.nil? || ftp.closed?
           end
         end
         body
@@ -358,9 +471,11 @@ module Searxng
         raise NetworkError, "Timeout Error: #{uri.host} took longer than #{timeout_ms}ms to respond"
       rescue SocketError, Errno::ECONNREFUSED, Errno::ETIMEDOUT, Errno::ECONNRESET, Errno::EPIPE, EOFError => e
         raise NetworkError, ErrorMessages.network_error(e, uri: uri, target: "FTP server")
+      rescue Searxng::Error
+        raise
       rescue => e
         if e.class.name.start_with?("Net::FTP")
-          raise APIError.new("FTP Error: #{e.message}", uri: uri.to_s)
+          raise APIError.new("FTP Error: #{e.message}", uri: redact_uri_string(uri))
         end
         raise e
       end
@@ -377,30 +492,39 @@ module Searxng
         password = uri.password || credential_for(uri.host, "SFTP_PASSWORD")
         raise ConfigurationError, "SFTP requires username (sftp://user@host/path or SFTP_USER)." unless user
 
-        path = uri.path.to_s
-        raise APIError.new("SFTP path is required", uri: uri.to_s) if path.empty? || path == "/"
+        path = URI.decode_www_form_component(uri.path.to_s)
+        safe_uri = redact_uri_string(uri)
+        raise APIError.new("SFTP path is required", uri: safe_uri) if path.empty? || path == "/"
+        raise ConfigurationError, "SFTP path contains unsupported characters" if path.match?(/[\r\n\x00]/)
 
         result = nil
         Timeout.timeout(timeout_ms / 1000.0) do
-          Net::SFTP.start(ip_address, user, password: password, port: uri.port || 22, non_interactive: true, verify_host_key: :always) do |sftp|
-            result = sftp.download!(path)
+          options = {password: password, port: uri.port || 22, non_interactive: true, verify_host_key: :always}
+          options[:host_key_alias] = uri.host if uri.host
+          Net::SFTP.start(ip_address, user, **options) do |sftp|
+            result = sftp.download!(path).to_s
           end
+        end
+        if result.to_s.bytesize > MAX_FETCH_BYTES
+          raise APIError.new("Content Error: response exceeds #{MAX_FETCH_BYTES} bytes", uri: safe_uri)
         end
         result.to_s
       rescue Timeout::Error
         raise NetworkError, "Timeout Error: #{uri.host} took longer than #{timeout_ms}ms to respond"
       rescue SocketError, Errno::ECONNREFUSED, Errno::ETIMEDOUT, Errno::ECONNRESET, Errno::EPIPE, EOFError => e
         raise NetworkError, ErrorMessages.network_error(e, uri: uri, target: "SFTP server")
+      rescue Searxng::Error
+        raise
       rescue => e
         raise e if e.is_a?(ConfigurationError)
         if e.class.name.include?("StatusException")
           description = e.respond_to?(:description) ? e.description : e.message
-          raise APIError.new("SFTP Error: #{description}", uri: uri.to_s)
+          raise APIError.new("SFTP Error: #{description}", uri: safe_uri)
         end
         if e.class.name.include?("AuthenticationFailed")
-          raise APIError.new("SFTP authentication failed", uri: uri.to_s)
+          raise APIError.new("SFTP authentication failed", uri: safe_uri)
         end
-        raise APIError.new("SFTP Error: #{e.message}", uri: uri.to_s)
+        raise APIError.new("SFTP Error: #{e.message}", uri: safe_uri)
       end
 
       def fetch_smb(uri, timeout_ms:, ip_address: nil)
@@ -410,15 +534,15 @@ module Searxng
         pass = uri.password || credential_for(uri.host, "SMB_PASSWORD")
         domain = credential_for(uri.host, "SMB_DOMAIN")
 
-        auth = if user
-          full_user = (domain && !domain.empty?) ? "#{domain}\\#{user}" : user
-          "#{full_user}%#{pass}"
+        full_user = if user
+          (domain && !domain.empty?) ? "#{domain}\\#{user}" : user
         end
 
-        escaped_remote = remote_path.gsub('"', '\"')
-        cmd = ["smbclient", "//#{ip_address}/#{share}", "-c", %(get "#{escaped_remote}" -)]
-        if auth
-          cmd << "-U" << auth
+        cmd = ["smbclient", "//#{ip_address}/#{share}", "-c", %(get "#{remote_path}" -), "-t", [(timeout_ms / 1000.0).ceil, 1].max.to_s]
+        env = {}
+        if full_user
+          cmd << "-U" << full_user
+          env["PASSWD"] = pass.to_s
         else
           cmd << "-N"
         end
@@ -426,26 +550,43 @@ module Searxng
         stdout = +""
         stderr = +""
         status = nil
+        wait_thr = nil
         Timeout.timeout(timeout_ms / 1000.0) do
-          stdout, stderr, status = Open3.capture3(*cmd)
+          Open3.popen3(env, *cmd) do |stdin, out, err, thr|
+            stdin.close
+            wait_thr = thr
+            stdout = out.read.to_s
+            stderr = err.read.to_s
+            status = thr.value
+          end
+        end
+        if stdout.bytesize > MAX_FETCH_BYTES
+          raise APIError.new("Content Error: response exceeds #{MAX_FETCH_BYTES} bytes", uri: redact_uri_string(uri))
         end
 
-        raise APIError.new("SMB Error: #{stderr.strip.empty? ? "request failed" : stderr.strip}", uri: uri.to_s) unless status.success?
+        raise APIError.new("SMB Error: #{stderr.strip.empty? ? "request failed" : stderr.strip[0, 500]}", uri: redact_uri_string(uri)) unless status&.success?
 
         stdout
       rescue Errno::ENOENT
         raise ConfigurationError, "SMB support requires 'smbclient' to be installed and available in PATH."
       rescue Timeout::Error
+        if wait_thr&.alive?
+          begin
+            Process.kill("TERM", wait_thr.pid)
+          rescue Errno::ESRCH
+          end
+        end
         raise NetworkError, "Timeout Error: #{uri.host} took longer than #{timeout_ms}ms to respond"
       rescue SocketError, Errno::ECONNREFUSED, Errno::ETIMEDOUT, Errno::ECONNRESET, Errno::EPIPE, EOFError => e
         raise NetworkError, ErrorMessages.network_error(e, uri: uri, target: "SMB server")
       end
 
       def parse_smb_path(uri)
-        segments = uri.path.to_s.split("/").reject(&:empty?)
+        raw_path = uri.path.to_s
+        segments = raw_path.split("/").reject(&:empty?).map { |segment| URI.decode_www_form_component(segment) }
         share = segments.shift
         remote = segments.join("/")
-        raise APIError.new("SMB path must include share and file (smb://host/share/path/file)", uri: uri.to_s) if share.to_s.empty? || remote.empty?
+        raise APIError.new("SMB path must include share and file (smb://host/share/path/file)", uri: redact_uri_string(uri)) if share.to_s.empty? || remote.empty?
         if share.match?(/[\x00-\x1f\x7f;"\\]/) || remote.match?(/[\x00-\x1f\x7f;"\\]/)
           raise ConfigurationError, "SMB path contains unsupported characters"
         end
@@ -457,26 +598,38 @@ module Searxng
         ip_address ||= validated_ip_address(uri)
         response_header = nil
         body = +""
+        tcp = nil
+        ssl = nil
+        safe_uri = redact_uri_string(uri)
         Timeout.timeout(timeout_ms / 1000.0) do
           tcp = TCPSocket.new(ip_address, uri.port || 1965)
           begin
             ctx = OpenSSL::SSL::SSLContext.new
-            ctx.verify_mode = (ENV["GEMINI_INSECURE"] == "1") ? OpenSSL::SSL::VERIFY_NONE : OpenSSL::SSL::VERIFY_PEER
+            if ENV["GEMINI_INSECURE"] == "1"
+              ctx.verify_mode = OpenSSL::SSL::VERIFY_NONE
+            else
+              ctx.set_params(verify_mode: OpenSSL::SSL::VERIFY_PEER)
+            end
             ssl = OpenSSL::SSL::SSLSocket.new(tcp, ctx)
             ssl.hostname = uri.host if ssl.respond_to?(:hostname=)
             ssl.connect
-            ssl.post_connection_check(uri.host)
+            ssl.post_connection_check(uri.host) unless ENV["GEMINI_INSECURE"] == "1"
             ssl.write("#{uri}\r\n")
-            response_header = ssl.gets("\r\n")
-            body = ssl.read.to_s
-            ssl.close
+            response_header = ssl.gets("\r\n", 2048)
+            while body.bytesize <= MAX_FETCH_BYTES
+              chunk = ssl.read(16_384)
+              break if chunk.nil? || chunk.empty?
+              body << chunk
+            end
+            raise APIError.new("Content Error: response exceeds #{MAX_FETCH_BYTES} bytes", uri: safe_uri) if body.bytesize > MAX_FETCH_BYTES
           ensure
-            tcp.close unless tcp.closed?
+            ssl&.close
+            tcp&.close unless tcp.nil? || tcp.closed?
           end
         end
 
         unless response_header
-          raise APIError.new("Gemini response error: empty response header", uri: uri.to_s)
+          raise APIError.new("Gemini response error: empty response header", uri: safe_uri)
         end
 
         status, meta = response_header.strip.split(/\s+/, 2)
@@ -485,15 +638,15 @@ module Searxng
         when 20..29
           body
         when 30..39
-          raise APIError.new("Gemini redirect (#{status_code}): #{meta}", status_code: status_code, uri: uri.to_s)
+          raise APIError.new("Gemini redirect (#{status_code}): #{meta}", status_code: status_code, uri: safe_uri)
         when 40..49
-          raise APIError.new("Gemini temporary failure (#{status_code}): #{meta}", status_code: status_code, uri: uri.to_s)
+          raise APIError.new("Gemini temporary failure (#{status_code}): #{meta}", status_code: status_code, uri: safe_uri)
         when 50..59
-          raise APIError.new("Gemini permanent failure (#{status_code}): #{meta}", status_code: status_code, uri: uri.to_s)
+          raise APIError.new("Gemini permanent failure (#{status_code}): #{meta}", status_code: status_code, uri: safe_uri)
         when 60..69
-          raise APIError.new("Gemini certificate required (#{status_code}): #{meta}", status_code: status_code, uri: uri.to_s)
+          raise APIError.new("Gemini certificate required (#{status_code}): #{meta}", status_code: status_code, uri: safe_uri)
         else
-          raise APIError.new("Gemini response error (#{status_code}): #{meta}", status_code: status_code, uri: uri.to_s)
+          raise APIError.new("Gemini response error (#{status_code}): #{meta}", status_code: status_code, uri: safe_uri)
         end
       rescue Timeout::Error
         raise NetworkError, "Timeout Error: #{uri.host} took longer than #{timeout_ms}ms to respond"
@@ -531,7 +684,7 @@ module Searxng
         return target if target_uri.scheme
 
         URI.join(base_uri.to_s, target).to_s
-      rescue URI::InvalidURIError
+      rescue URI::Error
         target
       end
 
@@ -544,7 +697,19 @@ module Searxng
         end
 
         cid = uri.host.to_s
+        unless cid.match?(/\A[a-zA-Z0-9_-]+\z/)
+          raise ConfigurationError, "IPFS CID is invalid"
+        end
+
         path = uri.path.to_s
+        segments = path.split("/").reject(&:empty?)
+        segments.each do |segment|
+          decoded = URI.decode_www_form_component(segment)
+          if decoded == "." || decoded == ".." || decoded.include?("\0")
+            raise ConfigurationError, "IPFS path is not allowed"
+          end
+        end
+
         query = uri.query ? "?#{uri.query}" : ""
         "#{gateway}/ipfs/#{cid}#{path}#{query}"
       rescue URI::InvalidURIError
@@ -575,7 +740,7 @@ module Searxng
         if File.exist?("#{local}.rb")
           require local
         else
-          raise ConfigurationError, "web_url_read requires teplo_core. Install the gem or provide textplorer/core-ruby in the expected workspace location."
+          raise ConfigurationError, "web_url_read requires the teplo_core gem for HTML to Markdown conversion."
         end
       end
 
@@ -585,12 +750,16 @@ module Searxng
 
         if section && !section.strip.empty?
           section_text = extract_section(result, section)
-          result = section_text.empty? ? %(Section "#{section}" not found in the content.) : section_text
+          return %(Section "#{section}" not found in the content.) if section_text.empty?
+
+          result = section_text
         end
 
         if paragraph_range && !paragraph_range.strip.empty?
           paragraph_text = extract_paragraph_range(result, paragraph_range)
-          result = paragraph_text.empty? ? %(Paragraph range "#{paragraph_range}" is invalid or out of bounds.) : paragraph_text
+          return %(Paragraph range "#{paragraph_range}" is invalid or out of bounds.) if paragraph_text.empty?
+
+          result = paragraph_text
         end
 
         start = [start_char.to_i, 0].max
@@ -672,7 +841,7 @@ module Searxng
           environment: {
             searxng_url: safe_url(searxng_url),
             has_auth: !!(user && password),
-            has_proxy: !!(ENV["HTTP_PROXY"] || ENV["HTTPS_PROXY"] || ENV["http_proxy"] || ENV["https_proxy"]),
+            has_proxy: !!(ENV["HTTP_PROXY"] || ENV["HTTPS_PROXY"] || ENV["http_proxy"] || ENV["https_proxy"] || ENV["ALL_PROXY"] || ENV["all_proxy"]),
             has_no_proxy: !!(ENV["NO_PROXY"] || ENV["no_proxy"])
           },
           capabilities: {
@@ -735,8 +904,8 @@ module Searxng
           - `smb`: opt-in through `SEARXNG_WEB_URL_SCHEMES` via `smbclient`
           - `gemini`: opt-in through `SEARXNG_WEB_URL_SCHEMES` (Gemini fetch + Gemtext conversion)
           - `ipfs`: supported via HTTP gateway mapping (`ipfs://...` -> `IPFS_GATEWAY`)
-          - `tor` / `i2p`: supported via `.onion` / `.i2p` hosts over HTTP(S) with proxy configuration
-          - `socks5`: configure via proxy environment and run through a local bridge/proxy compatible with your client setup
+          - `.onion` / `.i2p`: not supported by `web_url_read` (local DNS and destination policy run before any proxy)
+          - `socks5`: may work for SearXNG search via proxy env; not a bypass for `web_url_read` destination policy
 
           ## Examples
           - Search: `{"query":"latest ruby news","time_range":"day"}`

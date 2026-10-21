@@ -5,13 +5,16 @@ cmd = ARGV.shift
 case cmd
 when "serve"
   unless ENV["DEBUG"]
-    require "stringio"
-    $stderr = StringIO.new
-    $stderr.set_encoding("UTF-8")
+    $stderr.reopen(File::NULL, "w")
   end
   $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
   require "searxng/server"
-  Searxng::Server.start
+  begin
+    Searxng::Server.start
+  rescue Searxng::ConfigurationError => e
+    warn e.message
+    exit 1
+  end
 when "search"
   $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
   require "searxng"

@@ -233,10 +233,18 @@ RSpec.describe Searxng::Server do
 
     before do
       described_class.class_variable_set(:@@url_cache, {})
+      described_class.class_variable_set(:@@url_cache_bytes, 0)
       allow(Addrinfo).to receive(:getaddrinfo).and_call_original
       allow(Addrinfo).to receive(:getaddrinfo)
         .with("example.com", anything, nil, :STREAM)
         .and_return([Addrinfo.ip("93.184.216.34")])
+    end
+
+    def stub_fetch_http(http, response, body:)
+      allow(tool).to receive(:build_fetch_http).and_return(http)
+      allow(response).to receive(:[]).with("location").and_return(nil)
+      allow(response).to receive(:read_body) { |&block| block&.call(body) }
+      allow(http).to receive(:request) { |_request, &block| block.call(response) }
     end
 
     it "has tool_name web_url_read" do
@@ -244,19 +252,19 @@ RSpec.describe Searxng::Server do
     end
 
     it "rejects loopback destinations before making a request" do
-      expect { tool.call(url: "http://127.0.0.1/admin") }
-        .to raise_error(Searxng::ConfigurationError, /URL destination is not allowed/)
+      result = tool.call(url: "http://127.0.0.1/admin")
+      expect(result).to match(/Error:.*URL destination is not allowed/)
       expect(a_request(:get, "http://127.0.0.1/admin")).not_to have_been_made
     end
 
     it "disables credential-bearing network protocols by default" do
-      expect { tool.call(url: "sftp://example.com/path/file.txt") }
-        .to raise_error(Searxng::ConfigurationError, /URL scheme "sftp" is not enabled/)
+      result = tool.call(url: "sftp://example.com/path/file.txt")
+      expect(result).to match(/Error:.*URL scheme "sftp" is not enabled/)
     end
 
     it "rejects hostnames that resolve to a private destination" do
-      expect { tool.call(url: "http://localhost/admin") }
-        .to raise_error(Searxng::ConfigurationError, /URL destination is not allowed/)
+      result = tool.call(url: "http://localhost/admin")
+      expect(result).to match(/Error:.*URL destination is not allowed/)
       expect(a_request(:get, "http://localhost/admin")).not_to have_been_made
     end
 
@@ -264,11 +272,11 @@ RSpec.describe Searxng::Server do
       ENV["SEARXNG_WEB_URL_SCHEMES"] = "http,https,ipfs,smb"
       uri = URI("smb://example.com/share/report;recurse%20ON")
       allow(Searxng::NetworkPolicy).to receive(:validate!).and_return([uri, "93.184.216.34"])
-      allow(Open3).to receive(:capture3)
+      allow(Open3).to receive(:popen3)
 
-      expect { tool.call(url: uri.to_s) }
-        .to raise_error(Searxng::ConfigurationError, /SMB path contains unsupported characters/)
-      expect(Open3).not_to have_received(:capture3)
+      result = tool.call(url: uri.to_s)
+      expect(result).to match(/Error:.*SMB path contains unsupported characters/)
+      expect(Open3).not_to have_received(:popen3)
     end
 
     it "supports pagination and section extraction options" do
@@ -339,8 +347,8 @@ RSpec.describe Searxng::Server do
     end
 
     it "rejects unsupported schemes" do
-      expect { tool.call(url: "spartan://example.com") }.to raise_error(Searxng::ConfigurationError, /Unsupported URL scheme/)
-      expect { tool.call(url: "gopher://example.com") }.to raise_error(Searxng::ConfigurationError, /Unsupported URL scheme/)
+      expect(tool.call(url: "spartan://example.com")).to match(/Error:.*Unsupported URL scheme/)
+      expect(tool.call(url: "gopher://example.com")).to match(/Error:.*Unsupported URL scheme/)
     end
 
     it "extracts only headings when requested" do
@@ -372,6 +380,7 @@ RSpec.describe Searxng::Server do
 
     it "uses cache when available in fetch_html" do
       described_class.class_variable_set(:@@url_cache, {"https://example.com" => {at: Time.now.to_i, html: "<x>cached</x>"}})
+      described_class.class_variable_set(:@@url_cache_bytes, "<x>cached</x>".bytesize)
       result = tool.send(:fetch_html, "https://example.com", timeout_ms: 1000)
       expect(result).to eq("<x>cached</x>")
     end
@@ -380,25 +389,19 @@ RSpec.describe Searxng::Server do
       response = instance_double(Net::HTTPBadRequest, body: "bad", code: "400", message: "Bad Request")
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(false)
       http = instance_double(Net::HTTP)
-      allow(http).to receive(:ipaddr=)
-      allow(http).to receive(:request).and_return(response)
-      client = instance_double(Searxng::Client)
-      allow(client).to receive(:build_http).and_return(http)
-      allow(tool).to receive(:get_client).and_return(client)
+      stub_fetch_http(http, response, body: "bad")
+      allow(tool).to receive(:get_client).and_return(instance_double(Searxng::Client))
 
       expect { tool.send(:fetch_html, "https://example.com", timeout_ms: 1000) }
-        .to raise_error(Searxng::APIError, /400/)
+        .to raise_error(Searxng::APIError, /Website Error \(400\)/)
     end
 
     it "raises APIError for empty response body in fetch_html" do
       response = instance_double(Net::HTTPOK, body: " ", code: "200", message: "OK")
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
       http = instance_double(Net::HTTP)
-      allow(http).to receive(:ipaddr=)
-      allow(http).to receive(:request).and_return(response)
-      client = instance_double(Searxng::Client)
-      allow(client).to receive(:build_http).and_return(http)
-      allow(tool).to receive(:get_client).and_return(client)
+      stub_fetch_http(http, response, body: " ")
+      allow(tool).to receive(:get_client).and_return(instance_double(Searxng::Client))
 
       expect { tool.send(:fetch_html, "https://example.com", timeout_ms: 1000) }
         .to raise_error(Searxng::APIError, /empty content/)
@@ -406,14 +409,12 @@ RSpec.describe Searxng::Server do
 
     it "stores successful html fetches in cache" do
       described_class.class_variable_set(:@@url_cache, {})
+      described_class.class_variable_set(:@@url_cache_bytes, 0)
       response = instance_double(Net::HTTPOK, body: "<html>ok</html>", code: "200", message: "OK")
       allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
       http = instance_double(Net::HTTP)
-      allow(http).to receive(:ipaddr=)
-      allow(http).to receive(:request).and_return(response)
-      client = instance_double(Searxng::Client)
-      allow(client).to receive(:build_http).and_return(http)
-      allow(tool).to receive(:get_client).and_return(client)
+      stub_fetch_http(http, response, body: "<html>ok</html>")
+      allow(tool).to receive(:get_client).and_return(instance_double(Searxng::Client))
 
       result = tool.send(:fetch_html, "https://example.com", timeout_ms: 1000)
 
@@ -424,14 +425,19 @@ RSpec.describe Searxng::Server do
 
     it "raises NetworkError on timeout in fetch_html" do
       http = instance_double(Net::HTTP)
-      allow(http).to receive(:ipaddr=)
-      allow(http).to receive(:request) { sleep 0.01 }
-      client = instance_double(Searxng::Client)
-      allow(client).to receive(:build_http).and_return(http)
-      allow(tool).to receive(:get_client).and_return(client)
+      allow(tool).to receive(:build_fetch_http).and_return(http)
+      allow(http).to receive(:request) { sleep 0.05 }
+      allow(tool).to receive(:get_client).and_return(instance_double(Searxng::Client))
 
       expect { tool.send(:fetch_html, "https://example.com", timeout_ms: 1) }
         .to raise_error(Searxng::NetworkError, /Timeout Error/)
+    end
+
+    it "rejects IPFS path traversal and invalid CIDs" do
+      expect { tool.send(:resolve_ipfs_url, URI.parse("ipfs://cid/../../admin")) }
+        .to raise_error(Searxng::ConfigurationError, /IPFS path is not allowed/)
+      expect { tool.send(:resolve_ipfs_url, URI.parse("ipfs://bad..cid/path")) }
+        .to raise_error(Searxng::ConfigurationError, /IPFS CID is invalid/)
     end
 
     it "returns content warning when markdown conversion is empty" do
@@ -524,8 +530,8 @@ RSpec.describe Searxng::Server do
       allow(ssl).to receive(:connect)
       allow(ssl).to receive(:post_connection_check)
       allow(ssl).to receive(:write)
-      allow(ssl).to receive(:gets).with("\r\n").and_return("20 text/gemini\r\n")
-      allow(ssl).to receive(:read).and_return("# hello")
+      allow(ssl).to receive(:gets).with("\r\n", 2048).and_return("20 text/gemini\r\n")
+      allow(ssl).to receive(:read).with(16_384).and_return("# hello", nil)
       allow(ssl).to receive(:close)
       allow(tcp).to receive(:close)
 
@@ -544,8 +550,8 @@ RSpec.describe Searxng::Server do
       allow(ssl).to receive(:connect)
       allow(ssl).to receive(:post_connection_check)
       allow(ssl).to receive(:write)
-      allow(ssl).to receive(:gets).with("\r\n").and_return(nil)
-      allow(ssl).to receive(:read).and_return("")
+      allow(ssl).to receive(:gets).with("\r\n", 2048).and_return(nil)
+      allow(ssl).to receive(:read).with(16_384).and_return(nil)
       allow(ssl).to receive(:close)
       allow(tcp).to receive(:close)
 
@@ -563,20 +569,20 @@ RSpec.describe Searxng::Server do
       allow(ssl).to receive(:connect)
       allow(ssl).to receive(:post_connection_check)
       allow(ssl).to receive(:write)
-      allow(ssl).to receive(:read).and_return("")
+      allow(ssl).to receive(:read).with(16_384).and_return(nil)
       allow(ssl).to receive(:close)
       allow(tcp).to receive(:close)
 
-      allow(ssl).to receive(:gets).with("\r\n").and_return("41 temporary\r\n")
+      allow(ssl).to receive(:gets).with("\r\n", 2048).and_return("41 temporary\r\n")
       expect { tool.send(:fetch_gemini, uri, timeout_ms: 1000) }.to raise_error(Searxng::APIError, /temporary failure/)
 
-      allow(ssl).to receive(:gets).with("\r\n").and_return("51 permanent\r\n")
+      allow(ssl).to receive(:gets).with("\r\n", 2048).and_return("51 permanent\r\n")
       expect { tool.send(:fetch_gemini, uri, timeout_ms: 1000) }.to raise_error(Searxng::APIError, /permanent failure/)
 
-      allow(ssl).to receive(:gets).with("\r\n").and_return("61 cert\r\n")
+      allow(ssl).to receive(:gets).with("\r\n", 2048).and_return("61 cert\r\n")
       expect { tool.send(:fetch_gemini, uri, timeout_ms: 1000) }.to raise_error(Searxng::APIError, /certificate required/)
 
-      allow(ssl).to receive(:gets).with("\r\n").and_return("10 input\r\n")
+      allow(ssl).to receive(:gets).with("\r\n", 2048).and_return("10 input\r\n")
       expect { tool.send(:fetch_gemini, uri, timeout_ms: 1000) }.to raise_error(Searxng::APIError, /response error/)
     end
 
@@ -590,8 +596,8 @@ RSpec.describe Searxng::Server do
       allow(ssl).to receive(:connect)
       allow(ssl).to receive(:post_connection_check)
       allow(ssl).to receive(:write)
-      allow(ssl).to receive(:gets).with("\r\n").and_return("31 gemini://example.com/new\r\n")
-      allow(ssl).to receive(:read).and_return("")
+      allow(ssl).to receive(:gets).with("\r\n", 2048).and_return("31 gemini://example.com/new\r\n")
+      allow(ssl).to receive(:read).with(16_384).and_return(nil)
       allow(ssl).to receive(:close)
       allow(tcp).to receive(:close)
 
@@ -625,12 +631,16 @@ RSpec.describe Searxng::Server do
       stub_const("Net::FTP", Class.new)
       ftp = instance_double(Net::FTP, closed?: false)
       allow(Net::FTP).to receive(:new).and_return(ftp)
+      allow(ftp).to receive(:passive=)
+      allow(ftp).to receive(:use_pasv_ip=)
+      allow(ftp).to receive(:respond_to?).with(:use_pasv_ip=).and_return(true)
       allow(ftp).to receive(:connect)
       allow(ftp).to receive(:read_timeout=)
       allow(ftp).to receive(:open_timeout=)
       allow(ftp).to receive(:login)
       allow(ftp).to receive(:retrbinary) { |_cmd, _size, &blk| blk.call("abc") }
       allow(ftp).to receive(:close)
+      allow(tool).to receive(:validated_ip_address).and_return("93.184.216.34")
 
       result = tool.send(:fetch_ftp, URI.parse("ftp://example.com/path/file.txt"), timeout_ms: 1000)
 
@@ -735,8 +745,8 @@ RSpec.describe Searxng::Server do
       expect(content).to include("sftp")
       expect(content).to include("smb")
       expect(content).to include("ipfs")
-      expect(content).to include("tor")
-      expect(content).to include("i2p")
+      expect(content).to include(".onion")
+      expect(content).to include("not supported")
       expect(content).to include("socks5")
     end
   end

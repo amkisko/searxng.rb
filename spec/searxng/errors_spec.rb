@@ -32,6 +32,14 @@ RSpec.describe Searxng::ErrorMessages do
     end
   end
 
+  describe ".fetch_http_error" do
+    it "labels website failures and includes redirect Location" do
+      expect(described_class.fetch_http_error(404, "Not Found")).to include("Website Error (404)")
+      expect(described_class.fetch_http_error(302, "Found", location: "https://example.com/"))
+        .to include("Location: https://example.com/")
+    end
+  end
+
   it "formats no-results and configuration messages" do
     expect(described_class.no_results("ruby")).to include("No results found")
     expect(described_class.configuration_missing_url).to include("SEARXNG_URL")
@@ -40,3 +48,4 @@ RSpec.describe Searxng::ErrorMessages do
     expect(described_class.configuration_auth_pair).to include("must be set together")
   end
 end
+

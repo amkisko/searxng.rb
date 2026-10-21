@@ -222,13 +222,25 @@ RSpec.describe Searxng::Client do
       expect(client.send(:proxy_uri_for, other_uri)).to be_a(URI::HTTP)
     end
 
-    it "handles invalid proxy config and wildcard no_proxy" do
-      ENV["HTTP_PROXY"] = "bad::proxy::url"
+    it "respects wildcard no_proxy and raises on invalid proxy URLs" do
       ENV["NO_PROXY"] = "*"
       http_uri = URI.parse("http://any-host.local")
-
       expect(client.send(:no_proxy_match?, "any-host.local")).to be(true)
       expect(client.send(:proxy_uri_for, http_uri)).to be_nil
+
+      ENV.delete("NO_PROXY")
+      ENV["HTTP_PROXY"] = "bad::proxy::url"
+      expect { client.send(:proxy_uri_for, http_uri) }
+        .to raise_error(Searxng::ConfigurationError, /Proxy URL is invalid/)
+    end
+
+    it "rejects invalid time_range and safesearch values" do
+      stub_request(:get, %r{/search}).to_return(status: 200, body: '{"query":"x","results":[],"infoboxes":[]}')
+
+      expect { client.search("x", time_range: "week") }
+        .to raise_error(Searxng::ConfigurationError, /Invalid time_range/)
+      expect { client.search("x", safesearch: "strict") }
+        .to raise_error(Searxng::ConfigurationError, /Invalid safesearch/)
     end
 
     it "falls back to ALL_PROXY when protocol-specific proxy is missing" do
