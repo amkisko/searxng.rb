@@ -1,27 +1,27 @@
 prayfile "1"
 
-source "amkisko", git: "https://github.com/amkisko/prayers", distribution: "prayers"
+source "amkisko", git: "https://github.com/amkisko/prayers.git", distribution: "prayers"
 
 compose "AGENTS.md" do
   pray ".agents/project.md"
-  pray "amkisko/working-rules", "~> 2.0"
-pray "amkisko/docs-conventions", "~> 2.1"
-  pray "amkisko/dependency-issues", "~> 2.0"
-  pray "amkisko/dependency-policy", "~> 2.0", exports: ["dependency-policy", "skill"]
-  pray "amkisko/ruby-conventions", "~> 1.0"
-  pray "amkisko/minimal-implementation", "~> 1.0"
-  pray "amkisko/finite-state-machines", "~> 1.0"
+  pray "amkisko/working-rules", "~> 2.7"
+pray "amkisko/docs-conventions", "~> 3.5"
+  pray "amkisko/dependency-issues", "~> 3.0"
+  pray "amkisko/dependency-policy", "~> 4.1", exports: ["dependency-policy", "skill"]
+  pray "amkisko/ruby-conventions", "~> 1.3"
+  pray "amkisko/minimal-implementation", "~> 1.5"
+  pray "amkisko/finite-state-machines", "~> 1.3"
   pray "amkisko/branch-naming", "~> 1.0"
-  pray "amkisko/preferred-stack", "~> 1.0"
-  pray "amkisko/writing-prose", "~> 2.0"
-  pray "amkisko/rejected-changes", "~> 1.0"
-  pray "amkisko/publish-checks", "~> 1.0"
-  pray "amkisko/collaboration-workflow", "~> 2.0"
-  pray "amkisko/getting-started", "~> 1.0"
+  pray "amkisko/preferred-stack", "~> 1.6"
+  pray "amkisko/writing-prose", "~> 3.7"
+  pray "amkisko/rejected-changes", "~> 1.1"
+  pray "amkisko/publish-checks", "~> 1.1"
+  pray "amkisko/collaboration-workflow", "~> 2.5"
+  pray "amkisko/getting-started", "~> 1.1"
 end
 
 tree ".agents/skills" do
-  pray "amkisko/dependency-policy", "~> 2.0", exports: ["dependency-policy", "skill"]
-  pray "amkisko/engineering-audit", "~> 2.0"
-  pray "amkisko/changelog-update", "~> 2.0"
+  pray "amkisko/dependency-policy", "~> 4.1", exports: ["dependency-policy", "skill"]
+  pray "amkisko/engineering-audit", "~> 2.14"
+  pray "amkisko/changelog-update", "~> 3.0"
 end
