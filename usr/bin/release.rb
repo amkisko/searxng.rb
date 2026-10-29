@@ -39,15 +39,16 @@ version_content = File.read(version_file)
 version = version_content.match(/VERSION\s*=\s*"([0-9.]+)"/)[1]
 gem_file = "#{gem_name}-#{version}.gem"
 
+ReleaseVersionCheck.require_changelog_version!(version: version)
 ReleaseVersionCheck.warn_if_already_released(version: version, package_name: gem_name, registry: :rubygems)
 
 assert_clean_worktree!
 execute_command("gem build #{gem_name}.gemspec")
 
 puts "Ready to release #{gem_file} #{version}"
-print "Continue? [y/N] "
-answer = $stdin.gets.to_s.chomp
-unless answer == "y" || answer == "Y"
+print "Continue? [Y/n] "
+answer = $stdin.gets&.chomp
+if answer.nil? || (answer != "" && !answer.casecmp?("y"))
   puts "Exiting"
   exit 1
 end

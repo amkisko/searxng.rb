@@ -242,9 +242,13 @@ RSpec.describe Searxng::Server do
 
     def stub_fetch_http(http, response, body:)
       allow(tool).to receive(:build_fetch_http).and_return(http)
-      allow(response).to receive(:[]).with("location").and_return(nil)
-      allow(response).to receive(:read_body) { |&block| block&.call(body) }
-      allow(http).to receive(:request) { |_request, &block| block.call(response) }
+      stub_http_response(response, body)
+      allow(http).to receive(:request).and_yield(response)
+    end
+
+    def stub_http_response(response, body)
+      allow(response).to receive(:[]).and_return(nil)
+      allow(response).to receive(:read_body).and_yield(body)
     end
 
     it "has tool_name web_url_read" do

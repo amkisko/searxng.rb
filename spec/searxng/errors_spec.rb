@@ -48,4 +48,3 @@ RSpec.describe Searxng::ErrorMessages do
     expect(described_class.configuration_auth_pair).to include("must be set together")
   end
 end
-

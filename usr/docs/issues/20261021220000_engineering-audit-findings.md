@@ -16,10 +16,8 @@ Four model audits (Claude, GPT, Grok, Gemini) were fact-checked against this tre
 
 ## Next
 
-- Publish or path-declare `teplo_core` for clean gem installs of `web_url_read` HTML conversion.
-- Optional: bounded redirect following with per-hop `NetworkPolicy`.
-- Optional: SFTP `host_key_alias` for hostname known_hosts entries.
-- Split `server.rb` when cohesion allows (`AGENTS.md` size guidance).
+- Shipped in 0.2.1: response/cache ceilings, cleartext-proxy IP pin, NetworkPolicy gaps, Gemini CA store, SMB credential argv, release gate, website error wording, invalid search-filter rejection, IPFS path safety, Tor/I2P documentation correction.
+- Still open after 0.2.1: publish or path-declare `teplo_core` for clean gem installs of `web_url_read` HTML conversion; optional bounded redirect following with per-hop `NetworkPolicy`; optional SFTP `host_key_alias`; split `server.rb` when cohesion allows.
 
 ## Source
 

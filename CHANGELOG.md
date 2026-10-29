@@ -1,8 +1,8 @@
-# Changelog
+# CHANGELOG
 
 ## Unreleased
 
-## 0.2.1 (2026-10-21)
+## 0.2.1 (2026-10-29)
 
 - Fix cleartext HTTP proxy fetches to dial the `NetworkPolicy`-pinned IP and set `Host` to the original hostname.
 - Fix unbounded `web_url_read` response buffering with a shared byte ceiling across HTTP, FTP, SFTP, SMB, and Gemini.
@@ -14,6 +14,8 @@
 - Fix IPFS gateway path traversal via unsafe CID or `..` path segments.
 - Fix `timeoutMs` of `0` disabling deadlines; clamp to `1000..30000`.
 - Fix release gate ignoring lint/test failures (`pipefail`) and dirty staged/untracked trees.
+- Fix release confirmation treating EOF as publish; require an explicit Enter for the default.
+- Require a `CHANGELOG.md` version heading matching `VERSION` before gem push.
 - Fix `searxng serve` swallowing startup errors into an unbounded `StringIO`; reopen stderr to `File::NULL` and print configuration failures.
 - Add `NetworkPolicy` coverage for local NAT64 (`64:ff9b:1::/48`), IPv4-compatible embeds, documentation ranges, and bracketed IPv6 hostnames via `uri.hostname`.
 - Document Ruby `>= 3.4` and that `.onion` / `.i2p` are not supported by `web_url_read`.
