@@ -1,5 +1,9 @@
 # Multi-protocol fetch policy
 
+## Participants
+
+Andrei Makarov (@amkisko)
+
 ## Decisions
 
 web_url_read uses one destination policy across HTTP, HTTPS, FTP, SFTP, SMB, Gemini, and IPFS gateway requests. Every hostname is resolved and checked against private and reserved address ranges before connecting, and transports pin or otherwise bind the validated destination where their client supports it.

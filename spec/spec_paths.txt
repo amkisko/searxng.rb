@@ -1,0 +1,6 @@
+spec/release_spec.rb
+spec/searxng/client_spec.rb
+spec/searxng/errors_spec.rb
+spec/searxng/network_policy_spec.rb
+spec/searxng/server_spec.rb
+spec/searxng/version_spec.rb
