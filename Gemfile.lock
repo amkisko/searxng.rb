@@ -74,7 +74,7 @@ GEM
     parser (3.3.12.0)
       ast (~> 2.4.1)
       racc
-    polyrun (2.2.2)
+    polyrun (2.2.9)
     prism (1.9.0)
     public_suffix (7.0.5)
     racc (1.8.1)
@@ -185,7 +185,7 @@ PLATFORMS
 DEPENDENCIES
   appraisal (~> 2.5)
   memory_profiler (~> 1.1)
-  polyrun (>= 2.2.0)
+  polyrun (>= 2.2.9)
   rake (~> 13.3)
   rbs (~> 3.9)
   rspec (~> 3.13)
@@ -230,7 +230,7 @@ CHECKSUMS
   mime-types-data (3.2026.0701) sha256=cd8811e1fb89d836499ba0582368a10ee74cef929ba956d1d5ddca045e6a730f
   parallel (2.1.0) sha256=b35258865c2e31134c5ecb708beaaf6772adf9d5efae28e93e99260877b09356
   parser (3.3.12.0) sha256=21a6d7f755d5a24dfbdc6e6b772e4e879a52e7631a88bc5a3a134606052c9828
-  polyrun (2.2.2) sha256=fe2bbdd67c3111de641b88dae3c22ee524a14f8d8f028f033749a0b97334be68
+  polyrun (2.2.9) sha256=0ea6ea3590f3756e30fc5adb2358129ba4142cb1b86ebd7da975873444970ec3
   prism (1.9.0) sha256=7b530c6a9f92c24300014919c9dcbc055bf4cdf51ec30aed099b06cd6674ef85
   public_suffix (7.0.5) sha256=1a8bb08f1bbea19228d3bed6e5ed908d1cb4f7c2726d18bd9cadf60bc676f623
   racc (1.8.1) sha256=4a7f6929691dbec8b5209a0b373bc2614882b55fc5d2e447a21aaa691303d62f

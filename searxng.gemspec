@@ -33,7 +33,7 @@ Gem::Specification.new do |spec|
   spec.add_runtime_dependency "base64", "~> 0.1"
 
   spec.add_development_dependency "rspec", "~> 3.13"
-  spec.add_development_dependency "polyrun", ">= 2.2.0"
+  spec.add_development_dependency "polyrun", ">= 2.2.9"
   spec.add_development_dependency "webmock", "~> 3.26"
   spec.add_development_dependency "vcr", "~> 6.0"
   spec.add_development_dependency "rake", "~> 13.3"
